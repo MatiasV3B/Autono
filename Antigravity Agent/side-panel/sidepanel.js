@@ -6016,8 +6016,12 @@ You are a world-class principal software engineer.
     } else if (msg?.type === 'CONTEXT_MENU_ASK_ANTIGRAVITY') {
       if (promptInput) {
         promptInput.focus();
-        if (msg.pageTitle) {
-          promptInput.placeholder = `Ask about "${msg.pageTitle.slice(0, 35)}"...`;
+        if (msg.selectionText) {
+          promptInput.value = `Pregunta sobre el texto seleccionado: "${msg.selectionText}"\n\n`;
+          promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+          handleInputStateChange();
+        } else if (msg.pageTitle) {
+          promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
         }
       }
     }

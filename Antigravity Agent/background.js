@@ -97,7 +97,7 @@ function setupContextMenus() {
       chrome.contextMenus.create({
         id: 'antigravity_ask_page',
         title: 'Ask Antigravity',
-        contexts: ['page', 'frame', 'link', 'image']
+        contexts: ['page', 'frame', 'link', 'image', 'selection']
       });
     });
   } catch (err) {
@@ -123,6 +123,7 @@ chrome.contextMenus?.onClicked?.addListener(async (info, tab) => {
       tabId: tab.id,
       pageUrl: tab.url,
       pageTitle: tab.title,
+      selectionText: info.selectionText || '',
     });
   }
 });

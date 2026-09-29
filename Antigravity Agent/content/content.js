@@ -93,7 +93,37 @@
     }
   }
 
-  // NOTE: Text selection popup chip disabled as requested - Ask Antigravity is now invoked via Right-Click!
+  function onSelectionMouseUp(e) {
+    if (askChip && askChip.contains(e.target)) return;
+
+    // Small delay to allow browser to complete selection range
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+
+      const text = sel.toString().trim();
+      if (!text || text.length < 2) {
+        removeAskChip();
+        return;
+      }
+
+      const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+      if (!range) return;
+
+      const rect = range.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+      const x = rect.left + rect.width / 2;
+      let y = rect.top - 42;
+      if (y < 10) {
+        y = rect.bottom + 8;
+      }
+
+      createAskChip(x, y, text);
+    }, 20);
+  }
+
+  document.addEventListener('mouseup', onSelectionMouseUp);
   document.addEventListener('mousedown', onSelectionMouseDown);
   document.addEventListener('scroll', removeAskChip, { passive: true });
 
