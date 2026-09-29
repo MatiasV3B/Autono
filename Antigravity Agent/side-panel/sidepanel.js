@@ -807,16 +807,31 @@ marked.setOptions({
         break;
 
       case 'preset_prompt':
-        if (msg.text) {
+        if (msg.selectedText || (msg.text && msg.text.includes('Respecto a este fragmento'))) {
+          const selText = msg.selectedText || msg.text.replace(/^Respecto a este fragmento seleccionado:\s*"?/, '').replace(/"?\s*$/, '').trim();
+          const previewName = selText.length > 25 ? selText.slice(0, 22) + '...' : selText;
+          addAttachedItem({
+            type: 'fragment',
+            name: `Selección: "${previewName}"`,
+            content: `Texto seleccionado de ${msg.title || msg.url || 'la página'}:\nURL: ${msg.url || ''}\n\n"${selText}"`,
+            url: msg.url,
+            title: msg.title,
+          });
+          promptInput.value = '';
+          promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
+          promptInput.focus();
+          handleInputStateChange();
+          showToast('Texto seleccionado adjuntado como contexto');
+        } else if (msg.text) {
           promptInput.value = msg.text;
           promptInput.focus();
           handleInputStateChange();
-          if (promptBeamContainer) {
-            promptBeamContainer.style.filter = 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.6))';
-            setTimeout(() => {
-              promptBeamContainer.style.filter = '';
-            }, 1800);
-          }
+        }
+        if (promptBeamContainer) {
+          promptBeamContainer.style.filter = 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.6))';
+          setTimeout(() => {
+            promptBeamContainer.style.filter = '';
+          }, 1800);
         }
         break;
 
@@ -1699,10 +1714,37 @@ marked.setOptions({
       return;
     }
 
+    // Direct /skill reusable skill creator shortcut handling
+    if (text.startsWith('/skill')) {
+      const remainder = text.replace(/^\/skill\s*/i, '').trim();
+      promptInput.value = '';
+      hideSlashMenu();
+      handleInputStateChange();
+      openSkillCreatorModal(remainder);
+      return;
+    }
+
     hideAiPromptSuggestions();
 
     let displayPrompt = text;
     let finalPrompt = text;
+
+    // Check if prompt is a direct invocation of a custom skill
+    if (text.startsWith('/')) {
+      const firstWord = text.split(/\s+/)[0].slice(1).toLowerCase();
+      const matchedSkill = customSkills.find(s => s.name.toLowerCase() === firstWord);
+      if (matchedSkill) {
+        if (matchedSkill.mode === 'cowork' && !isCoworkActive) {
+          toggleCoworkMode(true);
+        } else if (matchedSkill.mode === 'chat' && isCoworkActive) {
+          toggleCoworkMode(false);
+        }
+        const userArg = text.slice(firstWord.length + 1).trim();
+        finalPrompt = userArg ? `${matchedSkill.prompt}\n\nDetalles del usuario: ${userArg}` : matchedSkill.prompt;
+        displayPrompt = userArg ? `⚡ /${matchedSkill.name} ${userArg}` : `⚡ /${matchedSkill.name}`;
+      }
+    }
+
     let searchCardHtml = '';
 
     lastUserPrompt = text;
@@ -3253,12 +3295,18 @@ marked.setOptions({
     const soundInput = document.getElementById('settingCompletionSound');
     if (soundInput && s.completionSound !== undefined) soundInput.checked = Boolean(s.completionSound);
 
+    // Appearance settings restoration
+    if (s.borderBeamGlow) applyBorderBeam(s.borderBeamGlow);
+    if (s.chatFontSize) applyChatFontSize(s.chatFontSize);
+    if (s.chatSpacing) applyChatSpacing(s.chatSpacing);
+    if (s.colorTheme) applyTheme(s.colorTheme);
+
     // User Profile fields (Synchronized with onboarding localStorage)
     const userNameInput = document.getElementById('settingUserName');
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
     if (userNameInput) userNameInput.value = s.userName || savedLocalName;
 
-    const userNickInput = document.getElementById('settingUserNickname');
+    const userNickInput = document.getElementById('settingUserNickname') || document.getElementById('settingUserNick');
     const savedLocalNick = localStorage.getItem('antigravity_user_nick') || '';
     if (userNickInput) userNickInput.value = s.userNickname || savedLocalNick;
 
@@ -3303,37 +3351,149 @@ marked.setOptions({
     initScratchpad();
   }
 
-  // Custom Skills UI & Upload logic
-  function renderSkillChips() {
-    const container = document.getElementById('skillsChipsContainer');
+  // ─── Custom Skills & /skill Engine ───────────────────────────────────────────
+  function renderCustomSkillsList() {
+    const container = document.getElementById('customSkillsList') || document.getElementById('skillsChipsContainer');
     if (!container) return;
     container.innerHTML = '';
     if (!Array.isArray(customSkills) || customSkills.length === 0) {
-      container.innerHTML = '<span class="field-hint" style="color:#71717a;font-size:11.5px;padding:4px 0;display:block;">No hay skills personalizadas. Sube archivos .md o .json arriba.</span>';
+      container.innerHTML = `
+        <div style="text-align:center;padding:22px 14px;color:#71717a;font-size:12px;border:1px dashed rgba(255,255,255,0.08);border-radius:10px;">
+          <span>No hay skills personalizadas todavía.</span><br>
+          <span style="font-size:11px;opacity:0.8;margin-top:4px;display:inline-block;">Escribe una tarea y usa <code>/skill</code> para crear tu primera skill repetible.</span>
+        </div>
+      `;
       return;
     }
+
     customSkills.forEach((sk, idx) => {
-      const chip = document.createElement('div');
-      chip.className = 'skill-chip';
-      chip.innerHTML = `
-        <div class="skill-chip-content">
-          <span class="skill-chip-name">/${escapeHtml(sk.name)}</span>
-          <span class="skill-chip-desc">${escapeHtml(sk.desc || '')}</span>
+      const item = document.createElement('div');
+      item.className = 'custom-skill-item';
+      item.innerHTML = `
+        <div class="custom-skill-meta">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="custom-skill-cmd">/${escapeHtml(sk.name)}</span>
+            <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:#a1a1aa;text-transform:uppercase;">${escapeHtml(sk.mode || 'chat')}</span>
+          </div>
+          <span class="custom-skill-desc">${escapeHtml(sk.desc || sk.prompt?.slice(0, 60) || '')}</span>
         </div>
-        <button type="button" class="skill-chip-del" title="Delete skill">&times;</button>
+        <div class="custom-skill-actions">
+          <button type="button" class="custom-skill-action-btn run-btn" title="Cargar esta skill en el chat">▶ Usar</button>
+          <button type="button" class="custom-skill-action-btn delete" title="Eliminar skill">&times;</button>
+        </div>
       `;
-      chip.querySelector('.skill-chip-del')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        customSkills.splice(idx, 1);
-        try {
-          localStorage.setItem('antigravity_custom_skills', JSON.stringify(customSkills));
-        } catch (_) {}
-        renderSkillChips();
-        showToast(`Skill "/${sk.name}" deleted`);
+
+      item.querySelector('.run-btn')?.addEventListener('click', () => {
+        if (sk.mode === 'cowork' && !isCoworkActive) {
+          toggleCoworkMode(true);
+        } else if (sk.mode === 'chat' && isCoworkActive) {
+          toggleCoworkMode(false);
+        }
+        promptInput.value = sk.prompt || '';
+        handleInputStateChange();
+        settingsModal?.classList.add('hidden');
+        promptInput?.focus();
+        showToast(`Skill "/${sk.name}" lista en el chat`);
       });
-      container.appendChild(chip);
+
+      item.querySelector('.delete')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`¿Eliminar la skill "/${sk.name}"?`)) {
+          customSkills.splice(idx, 1);
+          try {
+            localStorage.setItem('antigravity_custom_skills', JSON.stringify(customSkills));
+          } catch (_) {}
+          renderCustomSkillsList();
+          showToast(`Skill "/${sk.name}" eliminada`);
+        }
+      });
+
+      container.appendChild(item);
     });
   }
+
+  function renderSkillChips() {
+    renderCustomSkillsList();
+  }
+
+  // Skill Creator Modal Controls
+  const skillCreatorModal = document.getElementById('skillCreatorModal');
+  const closeSkillCreatorBtn = document.getElementById('closeSkillCreatorBtn');
+  const cancelSkillCreatorBtn = document.getElementById('cancelSkillCreatorBtn');
+  const saveSkillModalBtn = document.getElementById('saveSkillModalBtn');
+  const openCreateSkillModalBtn = document.getElementById('openCreateSkillModalBtn');
+  const newSkillNameInput = document.getElementById('newSkillName');
+  const newSkillDescInput = document.getElementById('newSkillDesc');
+  const newSkillPromptInput = document.getElementById('newSkillPrompt');
+  const newSkillModeInput = document.getElementById('newSkillMode');
+  const newSkillCommandPreview = document.getElementById('newSkillCommandPreview');
+
+  function openSkillCreatorModal(prefillPrompt = '') {
+    if (!skillCreatorModal) return;
+    const currentVal = promptInput ? promptInput.value.replace(/^\/skill\s*/i, '').trim() : '';
+    const promptToUse = prefillPrompt || currentVal;
+
+    if (newSkillPromptInput && promptToUse) {
+      newSkillPromptInput.value = promptToUse;
+    }
+    updateSkillCmdPreview();
+    skillCreatorModal.classList.remove('hidden');
+    if (newSkillNameInput) newSkillNameInput.focus();
+  }
+
+  function closeSkillCreatorModal() {
+    if (!skillCreatorModal) return;
+    skillCreatorModal.classList.add('hidden');
+    if (newSkillNameInput) newSkillNameInput.value = '';
+    if (newSkillDescInput) newSkillDescInput.value = '';
+    if (newSkillPromptInput) newSkillPromptInput.value = '';
+    if (newSkillModeInput) newSkillModeInput.value = 'chat';
+  }
+
+  function updateSkillCmdPreview() {
+    if (!newSkillCommandPreview || !newSkillNameInput) return;
+    const slug = (newSkillNameInput.value.trim() || 'my-skill').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    newSkillCommandPreview.textContent = `/${slug}`;
+  }
+
+  newSkillNameInput?.addEventListener('input', updateSkillCmdPreview);
+  closeSkillCreatorBtn?.addEventListener('click', closeSkillCreatorModal);
+  cancelSkillCreatorBtn?.addEventListener('click', closeSkillCreatorModal);
+  openCreateSkillModalBtn?.addEventListener('click', () => openSkillCreatorModal());
+
+  saveSkillModalBtn?.addEventListener('click', () => {
+    let name = (newSkillNameInput?.value || '').trim().toLowerCase().replace(/^\//, '').replace(/[^a-z0-9_-]/g, '-');
+    const desc = (newSkillDescInput?.value || '').trim() || 'Custom reusable skill';
+    const prompt = (newSkillPromptInput?.value || '').trim();
+    const mode = newSkillModeInput?.value || 'chat';
+
+    if (!name) {
+      showToast('Por favor escribe un nombre para la skill');
+      newSkillNameInput?.focus();
+      return;
+    }
+    if (!prompt) {
+      showToast('Por favor escribe las instrucciones o prompt de la skill');
+      newSkillPromptInput?.focus();
+      return;
+    }
+
+    const existingIdx = customSkills.findIndex(s => s.name.toLowerCase() === name);
+    const newSkill = { name, desc, prompt, mode };
+    if (existingIdx >= 0) {
+      customSkills[existingIdx] = newSkill;
+    } else {
+      customSkills.push(newSkill);
+    }
+
+    try {
+      localStorage.setItem('antigravity_custom_skills', JSON.stringify(customSkills));
+    } catch (_) {}
+
+    closeSkillCreatorModal();
+    renderCustomSkillsList();
+    showToast(`Skill "/${name}" guardada con éxito`);
+  });
 
   const uploadSkillBtn = document.getElementById('uploadSkillBtn');
   const skillFileInput = document.getElementById('skillFileInput');
@@ -3374,8 +3534,8 @@ marked.setOptions({
           customSkills.push({ name, desc, prompt });
         }
         localStorage.setItem('antigravity_custom_skills', JSON.stringify(customSkills));
-        renderSkillChips();
-        showToast(`Skill "/${name}" added`);
+        renderCustomSkillsList();
+        showToast(`Skill "/${name}" importada`);
       } catch (err) {
         showToast('Error reading skill file');
       }
@@ -3383,7 +3543,93 @@ marked.setOptions({
     });
   }
 
-  // Realtime Appearance Controls Sync
+  // ─── Theme & Appearance Controls ─────────────────────────────────────────────
+  const THEME_PALETTES = {
+    cyan: { accent: '#00f2fe', glow: 'rgba(0, 242, 254, 0.35)', search: '#00f2fe' },
+    purple: { accent: '#a855f7', glow: 'rgba(168, 85, 247, 0.35)', search: '#a855f7' },
+    emerald: { accent: '#10b981', glow: 'rgba(16, 185, 129, 0.35)', search: '#10b981' },
+    crimson: { accent: '#f43f5e', glow: 'rgba(244, 63, 94, 0.35)', search: '#f43f5e' },
+    amber: { accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.35)', search: '#f59e0b' },
+  };
+
+  function applyTheme(themeKey) {
+    const palette = THEME_PALETTES[themeKey] || THEME_PALETTES.cyan;
+    document.documentElement.style.setProperty('--accent-color', palette.accent);
+    document.documentElement.style.setProperty('--accent-glow', palette.glow);
+    document.documentElement.style.setProperty('--accent-search', palette.search);
+    document.documentElement.setAttribute('data-theme', themeKey);
+    try {
+      localStorage.setItem('antigravity_theme', themeKey);
+    } catch (_) {}
+
+    document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-theme') === themeKey);
+    });
+  }
+
+  function applyBorderBeam(beamStyle) {
+    document.documentElement.setAttribute('data-beam-style', beamStyle || 'dynamic');
+    try {
+      localStorage.setItem('antigravity_border_beam', beamStyle || 'dynamic');
+    } catch (_) {}
+    const el = document.getElementById('settingBorderBeamGlow');
+    if (el && el.value !== beamStyle) el.value = beamStyle;
+  }
+
+  function applyChatFontSize(fontSize) {
+    document.documentElement.style.setProperty('--chat-font-size', fontSize || '14px');
+    try {
+      localStorage.setItem('antigravity_chat_font_size', fontSize || '14px');
+    } catch (_) {}
+    const el = document.getElementById('settingChatFontSize');
+    if (el && el.value !== fontSize) el.value = fontSize;
+  }
+
+  function applyChatSpacing(spacing) {
+    document.documentElement.setAttribute('data-chat-spacing', spacing || 'comfortable');
+    try {
+      localStorage.setItem('antigravity_chat_spacing', spacing || 'comfortable');
+    } catch (_) {}
+    const el = document.getElementById('settingChatSpacing');
+    if (el && el.value !== spacing) el.value = spacing;
+  }
+
+  // Theme preset buttons click listener
+  document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const theme = btn.getAttribute('data-theme');
+      if (theme) applyTheme(theme);
+    });
+  });
+
+  const settingBorderBeamGlowEl = document.getElementById('settingBorderBeamGlow');
+  settingBorderBeamGlowEl?.addEventListener('change', () => {
+    applyBorderBeam(settingBorderBeamGlowEl.value);
+  });
+
+  const settingChatFontSizeEl = document.getElementById('settingChatFontSize');
+  settingChatFontSizeEl?.addEventListener('change', () => {
+    applyChatFontSize(settingChatFontSizeEl.value);
+  });
+
+  const settingChatSpacingEl = document.getElementById('settingChatSpacing');
+  settingChatSpacingEl?.addEventListener('change', () => {
+    applyChatSpacing(settingChatSpacingEl.value);
+  });
+
+  // Initialize appearance presets
+  try {
+    const savedTheme = localStorage.getItem('antigravity_theme') || 'cyan';
+    applyTheme(savedTheme);
+    const savedBeam = localStorage.getItem('antigravity_border_beam') || 'dynamic';
+    applyBorderBeam(savedBeam);
+    const savedFontSize = localStorage.getItem('antigravity_chat_font_size') || '14px';
+    applyChatFontSize(savedFontSize);
+    const savedSpacing = localStorage.getItem('antigravity_chat_spacing') || 'comfortable';
+    applyChatSpacing(savedSpacing);
+  } catch (_) {}
+
+  // Realtime Grid Controls Sync
   const settingGridOpacityEl = document.getElementById('settingGridOpacity');
   if (settingGridOpacityEl) {
     settingGridOpacityEl.addEventListener('change', () => {
@@ -3474,7 +3720,7 @@ marked.setOptions({
 
   function saveAllSettings() {
     const rawSysPrompt = document.getElementById('settingSystemPrompt')?.value || '';
-    const userNick = document.getElementById('settingUserNickname')?.value?.trim() || '';
+    const userNick = (document.getElementById('settingUserNickname') || document.getElementById('settingUserNick'))?.value?.trim() || '';
     const userName = document.getElementById('settingUserName')?.value?.trim() || '';
 
     // Guarantee strict subagent prohibition and user name preference
@@ -3503,6 +3749,10 @@ marked.setOptions({
       squareSize: parseInt(document.getElementById('settingSquareSize')?.value || '44', 10),
       trailDuration: document.getElementById('settingTrailDuration')?.value || '0.022',
       completionSound: document.getElementById('settingCompletionSound')?.checked ?? true,
+      borderBeamGlow: document.getElementById('settingBorderBeamGlow')?.value || 'dynamic',
+      chatFontSize: document.getElementById('settingChatFontSize')?.value || '14px',
+      chatSpacing: document.getElementById('settingChatSpacing')?.value || 'comfortable',
+      colorTheme: localStorage.getItem('antigravity_theme') || 'cyan',
       shadowEnabled: document.getElementById('settingShadowEnabled')?.checked ?? true,
       shadowPreventSleep: document.getElementById('settingShadowPreventSleep')?.checked ?? true,
       shadowAutoWake: document.getElementById('settingShadowAutoWake')?.checked ?? true,
@@ -4174,6 +4424,14 @@ You are a world-class principal software engineer.
       enabled: true,
       action: 'open_btw',
     },
+    {
+      name: '/skill',
+      desc: 'Crear o gestionar una skill reusable para repetir esta tarea',
+      tag: 'Skill',
+      prefix: '/skill ',
+      enabled: true,
+      action: 'open_skill_creator',
+    },
   ];
 
   function getAllSlashCommands() {
@@ -4204,7 +4462,7 @@ You are a world-class principal software engineer.
         if (!sk || !sk.name) return;
         list.push({
           name: `/${sk.name}`,
-          desc: sk.desc || 'Custom Skill',
+          desc: sk.desc || (sk.prompt ? sk.prompt.slice(0, 50) + '...' : 'Custom Skill'),
           tag: 'Skill',
           prefix: `/${sk.name} `,
           enabled: true,
@@ -4306,6 +4564,30 @@ You are a world-class principal software engineer.
       hideSlashMenu();
       promptInput.value = promptInput.value.replace(/^\/btw\s*/i, '').trim();
       handleInputStateChange();
+      return;
+    }
+
+    if (cmd.action === 'open_skill_creator') {
+      hideSlashMenu();
+      const currentVal = promptInput.value.replace(/^\/skill\s*/i, '').trim();
+      promptInput.value = '';
+      handleInputStateChange();
+      openSkillCreatorModal(currentVal);
+      return;
+    }
+
+    if (cmd.isCustomSkill && cmd.skill) {
+      hideSlashMenu();
+      if (cmd.skill.mode === 'cowork' && !isCoworkActive) {
+        toggleCoworkMode(true);
+      } else if (cmd.skill.mode === 'chat' && isCoworkActive) {
+        toggleCoworkMode(false);
+      }
+      promptInput.value = cmd.skill.prompt || '';
+      promptInput.focus();
+      promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+      handleInputStateChange();
+      showToast(`Skill "/${cmd.skill.name}" cargada`);
       return;
     }
 
@@ -6017,9 +6299,18 @@ You are a world-class principal software engineer.
       if (promptInput) {
         promptInput.focus();
         if (msg.selectionText) {
-          promptInput.value = `Pregunta sobre el texto seleccionado: "${msg.selectionText}"\n\n`;
-          promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+          const previewName = msg.selectionText.length > 25 ? msg.selectionText.slice(0, 22) + '...' : msg.selectionText;
+          addAttachedItem({
+            type: 'fragment',
+            name: `Selección: "${previewName}"`,
+            content: `Texto seleccionado de ${msg.pageTitle || msg.pageUrl || 'la página'}:\nURL: ${msg.pageUrl || ''}\n\n"${msg.selectionText}"`,
+            url: msg.pageUrl,
+            title: msg.pageTitle,
+          });
+          promptInput.value = '';
+          promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
           handleInputStateChange();
+          showToast('Texto seleccionado adjuntado como contexto');
         } else if (msg.pageTitle) {
           promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
         }

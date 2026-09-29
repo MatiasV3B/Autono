@@ -1878,43 +1878,218 @@ body {
 
 /* Modal Body & Scrollable Content */
 .settings-modal-body {
-  padding: 12px 14px 16px 14px;
+  padding: 16px 20px 24px 20px;
   overflow-y: auto;
   max-height: calc(88vh - 120px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* Card Component Architecture */
 .settings-card {
-  background: #1e1f23;
+  background: #18191d;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: 14px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  margin-bottom: 16px;
 }
 
 .card-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding-bottom: 10px;
+  padding-bottom: 12px;
 }
 
 .card-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: #f4f4f5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .card-desc {
-  font-size: 11.5px;
+  font-size: 12px;
   color: #a1a1aa;
-  margin-top: 2px;
+  margin-top: 3px;
+  line-height: 1.4;
 }
 
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+
+/* Theme Presets Grid */
+.theme-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.theme-preset-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-preset-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.theme-preset-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent-color, #00f2fe);
+  box-shadow: 0 0 14px var(--accent-glow, rgba(0, 242, 254, 0.3));
+  color: #ffffff;
+}
+
+.theme-color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Custom Skills List in Settings */
+.custom-skills-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.custom-skill-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: all 0.15s ease;
+}
+
+.custom-skill-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.custom-skill-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.custom-skill-cmd {
+  font-family: monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-color, #00f2fe);
+}
+
+.custom-skill-desc {
+  font-size: 11px;
+  color: #a1a1aa;
+}
+
+.custom-skill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-skill-action-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.custom-skill-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.custom-skill-action-btn.delete {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.custom-skill-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* Skill Creator Dialog */
+.skill-creator-dialog {
+  max-width: 540px;
+}
+
+/* Appearance Settings Styles */
+html[data-beam-style="subtle"] .border-beam-container::before {
+  animation: none !important;
+  opacity: 0.45 !important;
+  background: var(--accent-glow, rgba(0, 242, 254, 0.4)) !important;
+  inset: 0 !important;
+}
+
+html[data-beam-style="subtle"] .border-beam-container:focus-within::before {
+  opacity: 0.9 !important;
+  filter: drop-shadow(0 0 6px var(--accent-glow, rgba(0, 242, 254, 0.4))) !important;
+}
+
+html[data-beam-style="minimal"] .border-beam-container::before {
+  display: none !important;
+}
+
+html[data-beam-style="minimal"] .border-beam-container {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Chat Font Size */
+#messagesContainer,
+.user-bubble,
+.assistant-content,
+.markdown-content,
+.message-row {
+  font-size: var(--chat-font-size, 14px);
+}
+
+/* Chat Spacing */
+html[data-chat-spacing="compact"] .message-row {
+  margin-bottom: 8px !important;
+}
+
+html[data-chat-spacing="compact"] .user-bubble,
+html[data-chat-spacing="compact"] .assistant-content {
+  padding: 8px 12px !important;
+}
+
+html[data-chat-spacing="compact"] #messagesContainer {
+  gap: 8px !important;
+  padding: 10px 12px !important;
 }
 
 .card-footer {

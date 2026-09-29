@@ -2585,6 +2585,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       broadcastMessage({
         type: 'preset_prompt',
+        selectedText: message.text,
         text: `Respecto a este fragmento seleccionado: "${message.text}"\n\n`,
         url: message.url,
         title: message.title,

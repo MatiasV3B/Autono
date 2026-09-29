@@ -531,54 +531,59 @@
 
         <!-- Underline Tabs Navigation -->
         <div class="settings-tabs-list" role="tablist">
-          <button type="button" class="settings-tab-trigger active" data-tab="settings">Settings</button>
-          <button type="button" class="settings-tab-trigger" data-tab="scratchpad">Scratchpad</button>
-          <button type="button" class="settings-tab-trigger" data-tab="mcp">MCP Servers</button>
-          <button type="button" class="settings-tab-trigger" data-tab="appearance">Appearance</button>
-          <button type="button" class="settings-tab-trigger" data-tab="providers">External Providers</button>
-          <button type="button" class="settings-tab-trigger" data-tab="user">User</button>
+          <button type="button" class="settings-tab-trigger active" data-tab="settings">⚙️ Settings</button>
+          <button type="button" class="settings-tab-trigger" data-tab="appearance">🎨 Appearance</button>
+          <button type="button" class="settings-tab-trigger" data-tab="additional">🧩 Additional Features</button>
+          <button type="button" class="settings-tab-trigger" data-tab="user">👤 User & Skills</button>
         </div>
 
         <div class="modal-body settings-modal-body">
           <!-- Tab 1: Settings (Unifies General, Model, Work & Shadow) -->
+          <!-- Tab 1: Settings (Simplified, Spacious & Clear) -->
           <div class="settings-tab-content active" id="tabContent-settings">
-            <!-- Card 1: General Connection & Interface -->
+            <!-- Card 1: Connection & AI Model -->
             <div class="settings-card">
               <div class="card-header">
-                <h4 class="card-title">General</h4>
-                <p class="card-desc">Connection & interface</p>
+                <h4 class="card-title">Connection & AI Model</h4>
+                <p class="card-desc">Local backend bridge and primary intelligence configuration</p>
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingBridgeUrl">Bridge URL</label>
+                  <label for="settingBridgeUrl">Local Bridge URL (FastAPI)</label>
                   <div class="input-with-action">
                     <input type="text" id="settingBridgeUrl" value="http://127.0.0.1:8000" placeholder="http://127.0.0.1:8000">
                     <button type="button" id="testBridgeBtn" class="field-action-btn">Test</button>
                   </div>
-                  <div id="bridgeStatusBadge" class="field-hint"><span class="status-dot">●</span> Connected</div>
+                  <div id="bridgeStatusBadge" class="field-hint"><span class="status-dot">●</span> Connected to local bridge</div>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingDisplayMode">Mode</label>
-                  <select id="settingDisplayMode">
-                    <option value="side_panel">Side Panel</option>
-                    <option value="popup">Popup</option>
+                  <label for="settingDefaultModel">Default AI Model</label>
+                  <select id="settingDefaultModel">
+                    <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Ultra Fast · Recommended)</option>
+                    <option value="gemini-3.7-flash-medium">Gemini 3.7 Flash</option>
+                    <option value="gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
+                    <option value="gemini-3.1-pro-high">Gemini 3.1 Pro (Deep Reasoning)</option>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Thinking & Coding)</option>
+                    <option value="claude-opus-4-6-thinking">Claude Opus 4.6 (Frontier CoT)</option>
+                    <option value="gpt-oss-120b-medium">GPT-OSS 120B (Open Weights)</option>
                   </select>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingTinyFishKey">TinyFish Key</label>
-                  <div class="input-with-action">
-                    <input type="password" id="settingTinyFishKey" placeholder="Optional: tf_...">
-                    <button type="button" id="toggleApiKeyVisibility" class="field-action-btn" title="Toggle visibility">👁</button>
-                  </div>
+                  <label for="settingDefaultThinking">Thinking & Reasoning Level</label>
+                  <select id="settingDefaultThinking">
+                    <option value="high">High (Deep reasoning, planning, complex tasks)</option>
+                    <option value="medium" selected>Medium (Balanced speed and intelligence)</option>
+                    <option value="low">Low (Fast direct responses, zero delay)</option>
+                  </select>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingAgentLanguage">Language</label>
+                  <label for="settingAgentLanguage">Response Language</label>
                   <select id="settingAgentLanguage">
-                    <option value="en" selected>🇺🇸 English</option>
-                    <option value="es">🇪🇸 Español</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="es" selected>🇪🇸 Español</option>
                     <option value="pt">🇧🇷 Português</option>
                     <option value="fr">🇫🇷 Français</option>
                     <option value="de">🇩🇪 Deutsch</option>
@@ -586,70 +591,73 @@
                     <option value="auto">🌐 Auto Detect</option>
                   </select>
                 </div>
-              </div>
-            </div>
 
-            <!-- Card 2: Model & Inference -->
-            <div class="settings-card">
-              <div class="card-header">
-                <h4 class="card-title">Model</h4>
-                <p class="card-desc">Inference & thinking</p>
-              </div>
-              <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingDefaultModel">Default Model</label>
-                  <select id="settingDefaultModel">
-                    <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash</option>
-                    <option value="gemini-3.7-flash-medium">Gemini 3.7 Flash</option>
-                    <option value="gemini-3.6-flash-medium">Gemini 3.6 Flash</option>
-                    <option value="gemini-3.1-pro-high">Gemini 3.1 Pro</option>
-                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                    <option value="claude-opus-4-6-thinking">Claude Opus 4.6</option>
-                    <option value="gpt-oss-120b-medium">GPT-OSS 120B</option>
-                  </select>
+                  <label for="settingTinyFishKey">TinyFish Web Search Key (Optional)</label>
+                  <div class="input-with-action">
+                    <input type="password" id="settingTinyFishKey" placeholder="Optional: tf_...">
+                    <button type="button" id="toggleApiKeyVisibility" class="field-action-btn" title="Toggle visibility">👁</button>
+                  </div>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingDefaultThinking">Thinking Level</label>
-                  <select id="settingDefaultThinking">
-                    <option value="high">High</option>
-                    <option value="medium" selected>Medium</option>
-                    <option value="low">Low</option>
+                  <label for="settingDisplayMode">Extension Display Mode</label>
+                  <select id="settingDisplayMode">
+                    <option value="side_panel" selected>Side Panel (Sidebar)</option>
+                    <option value="popup">Popup Window</option>
                   </select>
-                </div>
-
-                <div class="setting-field">
-                  <label for="settingSystemPrompt">System Prompt</label>
-                  <textarea id="settingSystemPrompt" rows="3" placeholder="Custom instructions..."></textarea>
                 </div>
               </div>
             </div>
 
-            <!-- Card 3: Work (Cowork & Agent Autonomy) -->
+            <!-- Card 2: Agent Behavior & Automation -->
             <div class="settings-card">
               <div class="card-header">
-                <h4 class="card-title">Work & Agent Autonomy</h4>
-                <p class="card-desc">Autonomous browser actions</p>
+                <h4 class="card-title">Agent Behavior & Automation</h4>
+                <p class="card-desc">Safety controls, execution limits, and workspace protection</p>
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingMaxSteps">Max Steps</label>
+                  <label for="settingMaxSteps">Maximum Steps per Task</label>
                   <input type="number" id="settingMaxSteps" value="30" min="5" max="100">
+                  <span class="field-hint">Safety cap to prevent infinite loops during automated browsing tasks.</span>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingAutonomyMode">Supervision</label>
+                  <label for="settingAutonomyMode">Supervision Level</label>
                   <select id="settingAutonomyMode">
-                    <option value="supervised" selected>Supervised</option>
-                    <option value="semi">Semi-autonomous</option>
-                    <option value="full">Full autonomy</option>
+                    <option value="supervised" selected>Supervised (Recommended · Highlights actions)</option>
+                    <option value="semi">Semi-Autonomous</option>
+                    <option value="full">Full Autonomy (Direct execution)</option>
                   </select>
                 </div>
 
                 <div class="setting-field-toggle">
                   <div class="toggle-text">
-                    <span class="toggle-title">Screen Vision</span>
-                    <span class="toggle-desc">Capture page screenshots</span>
+                    <span class="toggle-title">Working Overlay Shield</span>
+                    <span class="toggle-desc">Displays a luminous blue border on the webpage while the agent works, protecting against accidental clicks with Pause and Intervene buttons.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingWorkingOverlay" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Automatic Tab Grouping</span>
+                    <span class="toggle-desc">Organizes tabs opened by the agent into neatly labeled color-coded Chrome tab groups.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingAutoTabGrouping" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Screen Vision (Visual Screenshots)</span>
+                    <span class="toggle-desc">Allows the agent to capture visual snapshots of the page when layout analysis is needed.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="settingVisionScreenshots" checked>
@@ -658,95 +666,17 @@
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingActionDelay">Action Delay</label>
+                  <label for="settingActionDelay">Action Execution Delay</label>
                   <select id="settingActionDelay">
-                    <option value="150">150ms Turbo</option>
-                    <option value="350" selected>350ms Normal</option>
-                    <option value="700">700ms Safe</option>
+                    <option value="150">150ms (Turbo)</option>
+                    <option value="350" selected>350ms (Normal · Recommended)</option>
+                    <option value="700">700ms (Safe & Deliberate)</option>
                   </select>
                 </div>
-              </div>
-            </div>
 
-            <!-- Card 4: Shadow (Power Management & Background Execution) -->
-            <div class="settings-card shadow-card" id="shadowSettingsCard">
-              <div class="card-header shadow-card-header">
-                <div>
-                  <h4 class="card-title">Shadow</h4>
-                  <p class="card-desc">Persistent background daemon, operating system power management, and wake timers</p>
-                </div>
-                <span id="shadowStatusPill" class="shadow-status-pill ready">Shadow Ready</span>
-              </div>
-              <div class="card-content">
-                <!-- Toggle: Shadow Mode -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Shadow Mode</span>
-                    <span class="toggle-desc">Keeps background tasks and goal execution running smoothly even when the browser is minimized or running behind other windows.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingShadowEnabled" checked>
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Toggle: Keep System Awake -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Keep System Awake</span>
-                    <span class="toggle-desc">Prevents operating system sleep, idle suspension, or network throttling while agent tasks are actively running.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingShadowPreventSleep" checked>
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Toggle: Scheduled Wake Timer -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Scheduled Wake Timer</span>
-                    <span class="toggle-desc">Coordinates with the operating system real-time clock to automatically wake the computer from sleep mode to run scheduled background jobs.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingShadowAutoWake" checked>
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Select: Action on Task Completion -->
                 <div class="setting-field">
-                  <label for="settingShadowOnComplete">Action on Task Completion</label>
-                  <select id="settingShadowOnComplete">
-                    <option value="none">Keep running</option>
-                    <option value="sleep" selected>Sleep</option>
-                    <option value="hibernate">Hibernate</option>
-                    <option value="shutdown">Shutdown</option>
-                  </select>
-                </div>
-
-                <!-- Direct Power Controls -->
-                <div class="shadow-power-actions">
-                  <div class="shadow-actions-title">Direct Power Controls</div>
-                  <div class="shadow-actions-grid">
-                    <button type="button" id="shadowSleepNowBtn" class="shadow-power-btn sleep-btn" title="Put computer to sleep now">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                      <span>Sleep PC</span>
-                    </button>
-                    <button type="button" id="shadowShutdownNowBtn" class="shadow-power-btn shutdown-btn" title="Shut down computer with 30s countdown">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></svg>
-                      <span>Shutdown PC</span>
-                    </button>
-                    <button type="button" id="shadowTestWakeBtn" class="shadow-power-btn wake-btn" title="Schedule test wake alarm in 2 minutes">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                      <span>Wake Alarm in 2m</span>
-                    </button>
-                    <button type="button" id="shadowCancelShutdownBtn" class="shadow-power-btn cancel-btn hidden" title="Cancel pending shutdown">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                      <span>Cancel Shutdown</span>
-                    </button>
-                  </div>
-                  <div id="shadowActionFeedback" class="shadow-feedback-msg hidden"></div>
+                  <label for="settingSystemPrompt">Custom System Prompt (Optional)</label>
+                  <textarea id="settingSystemPrompt" rows="2" placeholder="Custom instructions to append to all sessions..."></textarea>
                 </div>
               </div>
               <div class="card-footer">
@@ -755,146 +685,115 @@
             </div>
           </div>
 
-          <!-- Tab 2: Scratchpad (Agent Notes, Memory & Fast Prompt Injector) -->
-          <div class="settings-tab-content hidden" id="tabContent-scratchpad">
-            <div class="settings-card scratchpad-card">
-              <div class="card-header scratchpad-card-header">
-                <div>
-                  <h4 class="card-title">Scratchpad</h4>
-                  <p class="card-desc">Working notes, active agent memory, and quick prompt injector</p>
-                </div>
-                <span id="scratchpadSaveStatus" class="scratchpad-saved-badge">✓ Saved</span>
-              </div>
-              <div class="card-content scratchpad-card-content">
-                <!-- Scratchpad Toolbar -->
-                <div class="scratchpad-toolbar">
-                  <div class="scratchpad-template-select-wrap">
-                    <label for="scratchpadTemplateSelect">Template:</label>
-                    <select id="scratchpadTemplateSelect">
-                      <option value="custom">Free Notes</option>
-                      <option value="code_review">Code Review Plan</option>
-                      <option value="research_plan">Research Plan</option>
-                      <option value="task_goals">Task List and Goal Tracker</option>
-                      <option value="bug_debug">Bug Analysis and Hypothesis</option>
-                      <option value="system_instructions">Personality Instructions</option>
-                    </select>
-                  </div>
-                  <div class="scratchpad-actions">
-                    <button type="button" id="scratchpadInsertBtn" class="scratch-btn primary" title="Insert scratchpad contents at prompt start">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                      <span>Insert into chat</span>
-                    </button>
-                    <button type="button" id="scratchpadCopyBtn" class="scratch-btn" title="Copy notes to clipboard">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                      <span>Copy</span>
-                    </button>
-                    <button type="button" id="scratchpadDownloadBtn" class="scratch-btn" title="Download as Markdown file">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                      <span>.md</span>
-                    </button>
-                    <button type="button" id="scratchpadClearBtn" class="scratch-btn danger" title="Clear all notes">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Textarea -->
-                <div class="scratchpad-editor-wrapper">
-                  <textarea id="scratchpadTextarea" class="scratchpad-textarea" placeholder="Write notes, tasks, goal targets, code snippets, or instructions for the agent. Notes are saved automatically as you type."></textarea>
-                </div>
-
-                <!-- Stats Bar -->
-                <div class="scratchpad-footer-bar">
-                  <span id="scratchpadStats" class="scratchpad-stats">0 characters • 0 words</span>
-                  <span class="scratchpad-hint">Click Insert into chat to send notes directly to the prompt.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 3: MCP Servers -->
-          <div class="settings-tab-content hidden" id="tabContent-mcp">
-            <div class="settings-card">
-              <div class="card-header mcp-card-header">
-                <div>
-                  <h4 class="card-title">MCP Servers</h4>
-                  <p class="card-desc">Model Context Protocol integrations loaded in Antigravity</p>
-                </div>
-                <button type="button" id="resetMcpDefaultsBtn" class="mcp-reset-btn" title="Restore default MCP servers">Restore Defaults</button>
-              </div>
-              <div class="card-content">
-                <div class="mcp-servers-list" id="mcpServersList">
-                  <!-- Populated dynamically: StitchMCP, chrome-devtools, gemini-api-docs, pencil, stitch -->
-                </div>
-
-                <div class="add-mcp-box">
-                  <span class="add-mcp-title">Add Custom MCP Server</span>
-                  <div class="setting-field">
-                    <label for="newMcpName">Server Name</label>
-                    <input type="text" id="newMcpName" placeholder="e.g. github-server">
-                  </div>
-                  <div class="setting-field">
-                    <label for="newMcpTransport">Transport</label>
-                    <select id="newMcpTransport">
-                      <option value="stdio" selected>Stdio Command Line</option>
-                      <option value="sse">SSE Server Sent Events</option>
-                      <option value="http">HTTP Stream</option>
-                    </select>
-                  </div>
-                  <div class="setting-field">
-                    <label for="newMcpCommand">Command / URL</label>
-                    <input type="text" id="newMcpCommand" placeholder="npx -y @modelcontextprotocol/server-... or https://...">
-                  </div>
-                  <button type="button" id="addMcpServerBtn" class="add-mcp-btn">+ Add Server</button>
-                </div>
-              </div>
-              <div class="card-footer">
-                <button type="button" class="save-settings-btn tab-save-btn">Save</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 5: Appearance -->
+          <!-- Tab 2: Appearance (Themes & Rich Visual Controls) -->
           <div class="settings-tab-content hidden" id="tabContent-appearance">
+            <!-- Theme Presets Card -->
             <div class="settings-card">
               <div class="card-header">
-                <h4 class="card-title">Appearance</h4>
-                <p class="card-desc">Visuals & effects</p>
+                <h4 class="card-title">Color Themes & Accents</h4>
+                <p class="card-desc">Select your favorite aesthetic color palette</p>
+              </div>
+              <div class="card-content">
+                <div class="theme-preset-grid" id="themePresetGrid">
+                  <button type="button" class="theme-preset-btn active" data-theme="cyan" title="Obsidian Cyan">
+                    <span class="theme-color-dot" style="background:#00f2fe;box-shadow:0 0 10px #00f2fe;"></span>
+                    <span class="theme-preset-name">Obsidian Cyan</span>
+                  </button>
+                  <button type="button" class="theme-preset-btn" data-theme="purple" title="Cosmic Violet">
+                    <span class="theme-color-dot" style="background:#a855f7;box-shadow:0 0 10px #a855f7;"></span>
+                    <span class="theme-preset-name">Cosmic Violet</span>
+                  </button>
+                  <button type="button" class="theme-preset-btn" data-theme="emerald" title="Emerald Matrix">
+                    <span class="theme-color-dot" style="background:#10b981;box-shadow:0 0 10px #10b981;"></span>
+                    <span class="theme-preset-name">Emerald Matrix</span>
+                  </button>
+                  <button type="button" class="theme-preset-btn" data-theme="crimson" title="Crimson Forge">
+                    <span class="theme-color-dot" style="background:#f43f5e;box-shadow:0 0 10px #f43f5e;"></span>
+                    <span class="theme-preset-name">Crimson Forge</span>
+                  </button>
+                  <button type="button" class="theme-preset-btn" data-theme="amber" title="Solar Gold">
+                    <span class="theme-color-dot" style="background:#f59e0b;box-shadow:0 0 10px #f59e0b;"></span>
+                    <span class="theme-preset-name">Solar Gold</span>
+                  </button>
+                </div>
+
+                <div class="setting-field" style="margin-top:8px;">
+                  <label for="settingBorderBeamGlow">Input Border Beam (Laser Glow)</label>
+                  <select id="settingBorderBeamGlow">
+                    <option value="dynamic" selected>Dynamic Glow (Animated rotating laser)</option>
+                    <option value="subtle">Subtle (Soft accent glow)</option>
+                    <option value="minimal">Minimal (Clean static border)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Laser Mesh & Grid Card -->
+            <div class="settings-card">
+              <div class="card-header">
+                <h4 class="card-title">Interactive Background & Laser Grid</h4>
+                <p class="card-desc">Ambient SVG mesh animations and mouse-tracking trails</p>
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingGridOpacity">Grid Opacity</label>
+                  <label for="settingGridOpacity">Laser Grid Intensity</label>
                   <select id="settingGridOpacity">
-                    <option value="0.035">Subtle (0.035)</option>
-                    <option value="0.065" selected>Visible (0.065)</option>
-                    <option value="0.110">Crisp (0.110)</option>
-                    <option value="0.180">High Contrast (0.180)</option>
-                    <option value="0.000">None</option>
+                    <option value="0.000">Disabled (Solid deep background)</option>
+                    <option value="0.035">Subtle (0.035 - Soft ambient)</option>
+                    <option value="0.065" selected>Visible (0.065 - Recommended)</option>
+                    <option value="0.110">Crisp (0.110 - Vibrant lines)</option>
+                    <option value="0.180">High Contrast (0.180 - Cyberpunk style)</option>
                   </select>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingSquareSize">Cell Size</label>
+                  <label for="settingSquareSize">Laser Grid Cell Size</label>
                   <select id="settingSquareSize">
-                    <option value="36">36px</option>
-                    <option value="44" selected>44px</option>
-                    <option value="56">56px</option>
+                    <option value="36">Compact (36px cells)</option>
+                    <option value="44" selected>Standard (44px cells)</option>
+                    <option value="56">Spacious (56px cells)</option>
                   </select>
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingTrailDuration">Trail Decay</label>
+                  <label for="settingTrailDuration">Interactive Trail Fade Speed</label>
                   <select id="settingTrailDuration">
-                    <option value="0.035">Fast</option>
-                    <option value="0.022" selected>Normal</option>
-                    <option value="0.012">Slow</option>
+                    <option value="0.035">Fast Fade (Snappy)</option>
+                    <option value="0.022" selected>Normal Fade (Smooth)</option>
+                    <option value="0.012">Long Trail (Sustained glow)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Chat Spacing & Sound Card -->
+            <div class="settings-card">
+              <div class="card-header">
+                <h4 class="card-title">Typography, Spacing & Audio</h4>
+                <p class="card-desc">Readability, chat layout comfort, and sound effects</p>
+              </div>
+              <div class="card-content">
+                <div class="setting-field">
+                  <label for="settingChatFontSize">Chat Font Size</label>
+                  <select id="settingChatFontSize">
+                    <option value="13px">Compact (13px)</option>
+                    <option value="14px" selected>Standard (14px)</option>
+                    <option value="15px">Large (15px · Easy reading)</option>
+                  </select>
+                </div>
+
+                <div class="setting-field">
+                  <label for="settingChatSpacing">Chat Message Spacing</label>
+                  <select id="settingChatSpacing">
+                    <option value="comfortable" selected>Comfortable (Balanced breathing room)</option>
+                    <option value="compact">Compact (More messages on screen)</option>
                   </select>
                 </div>
 
                 <div class="setting-field-toggle">
                   <div class="toggle-text">
-                    <span class="toggle-title">Completion Chime</span>
-                    <span class="toggle-desc">Sound on finish</span>
+                    <span class="toggle-title">Task Completion Chime</span>
+                    <span class="toggle-desc">Plays a subtle futuristic chime when an autonomous task completes.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="settingCompletionSound" checked>
@@ -903,119 +802,19 @@
                 </div>
               </div>
               <div class="card-footer">
-                <button type="button" class="save-settings-btn tab-save-btn">Save</button>
+                <button type="button" class="save-settings-btn tab-save-btn">Save Appearance</button>
               </div>
             </div>
           </div>
 
-          <!-- Tab 5: User (Profile & Skills) -->
-          <div class="settings-tab-content hidden" id="tabContent-user">
-            <div class="settings-card">
-              <div class="card-header">
-                <h4 class="card-title">User</h4>
-                <p class="card-desc">Profile & custom skills</p>
-              </div>
-              <div class="card-content">
-                <div class="setting-field">
-                  <label for="settingUserName">Your Name</label>
-                  <input type="text" id="settingUserName" placeholder="Your name">
-                </div>
-
-                <div class="setting-field">
-                  <label for="settingUserNickname">How should I call you?</label>
-                  <input type="text" id="settingUserNickname" placeholder="Nickname / Preferred name">
-                </div>
-
-                <div class="setting-field">
-                  <label>Skills</label>
-                  <div class="skills-upload-zone" id="skillsUploadZone">
-                    <input type="file" id="skillFileInput" accept=".md,.json,.txt,.skill" style="display:none;">
-                    <button type="button" id="uploadSkillBtn" class="upload-skill-btn">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                      </svg>
-                      <span>Upload Skill (.md, .json)</span>
-                    </button>
-                    <span class="field-hint">Upload custom skills to activate via / in chat.</span>
-                  </div>
-                  <div id="skillsChipsContainer" class="skills-chips-list"></div>
-                </div>
-              </div>
-              <div class="card-footer">
-                <button type="button" class="save-settings-btn tab-save-btn">Save</button>
-              </div>
-            </div>
-
-            <!-- Card: Customization (Browser Behavior & Working Overlay) -->
-            <div class="settings-card" id="customizationSettingsCard">
-              <div class="card-header">
-                <h4 class="card-title">Customization</h4>
-                <p class="card-desc">Browser behavior, automation grouping and active work overlay</p>
-              </div>
-              <div class="card-content">
-                <!-- Toggle 1: Auto Tab Grouping -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Auto Tab Grouping</span>
-                    <span class="toggle-desc">Automatically groups related tabs when the agent edits a page, runs automation in Work mode, or answers tasks. Helps clearly identify which tab is being worked on.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingTabGrouping" checked>
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Toggle 2: Working Overlay Shield -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Working Overlay Shield</span>
-                    <span class="toggle-desc">Displays a luminous rectangular blue gradient border on the page while the agent is executing actions with a transparent center. Shows Antigravity is working and temporarily protects the page from accidental user clicks, with an interactive Pause button and Write option to intervene.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingWorkingOverlay" checked>
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Toggle 3: Lock Sidebar to Active Tab -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Lock Sidebar to Active Tab</span>
-                    <span class="toggle-desc">Scopes the sidebar strictly to the specific tab or tab group where the agent is running. Automatically hides when switching to an unrelated tab and reopens upon returning to the task tab.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingTabLockedSidebar">
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-
-                <!-- Toggle 4: Wait message sent out instantly -->
-                <div class="setting-field-toggle">
-                  <div class="toggle-text">
-                    <span class="toggle-title">Wait message sent out instantly</span>
-                    <span class="toggle-desc">When enabled, your intervention messages are sent directly and immediately to the model while it works. When disabled, the agent finishes reasoning its current step before processing your message.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="settingWaitMessageSentOutInstantly">
-                    <span class="slider-toggle"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="card-footer">
-                <button type="button" class="save-settings-btn tab-save-btn">Save</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab: External Providers (OpenAI-compatible 3rd party providers, up to 5) -->
-          <div class="settings-tab-content hidden" id="tabContent-providers">
+          <!-- Tab 3: Additional Features (Combines External Providers, MCP & Shadow Mode) -->
+          <div class="settings-tab-content hidden" id="tabContent-additional">
+            <!-- Sub-Card 1: External AI Providers -->
             <div class="settings-card">
               <div class="card-header">
                 <div>
-                  <h4 class="card-title">External Providers</h4>
-                  <p class="card-desc">Connect up to 5 third-party OpenAI-compatible providers (Groq, Together, Ollama, DeepSeek, Aqua AI, etc.)</p>
+                  <h4 class="card-title">External AI Providers</h4>
+                  <p class="card-desc">Connect up to 5 third-party OpenAI-compatible providers (Groq, Together, Ollama, DeepSeek, OpenRouter, etc.)</p>
                 </div>
                 <span id="externalProvidersCountBadge" class="shadow-status-pill ready">0 / 5 Active</span>
               </div>
@@ -1029,24 +828,24 @@
                   
                   <div class="setting-field">
                     <label for="extProvName">Provider Name</label>
-                    <input type="text" id="extProvName" placeholder="e.g. Aqua AI, Together AI, Groq">
+                    <input type="text" id="extProvName" placeholder="e.g. Groq, Together AI, Ollama">
                   </div>
 
                   <div class="setting-field">
                     <label for="extProvId">Identifier (ID)</label>
-                    <input type="text" id="extProvId" placeholder="e.g. aqua, together, groq">
+                    <input type="text" id="extProvId" placeholder="e.g. groq, together, ollama">
                     <span class="field-hint">Used internally as the unique provider key.</span>
                   </div>
 
                   <div class="setting-field">
                     <label for="extProvBaseUrl">Base URL</label>
-                    <input type="text" id="extProvBaseUrl" placeholder="https://api.example.com/v1">
-                    <span class="field-hint">OpenAI-compatible chat completions root (supports /chat/completions and /models).</span>
+                    <input type="text" id="extProvBaseUrl" placeholder="https://api.groq.com/openai/v1">
+                    <span class="field-hint">Root URL supporting /chat/completions and /models.</span>
                   </div>
 
                   <div class="setting-field">
                     <label for="extProvApiKey">API Key (Optional)</label>
-                    <input type="password" id="extProvApiKey" placeholder="sk-...">
+                    <input type="password" id="extProvApiKey" placeholder="gsk_... or sk-...">
                   </div>
 
                   <div class="setting-field">
@@ -1074,17 +873,227 @@
                       <button type="button" id="extProvFetchModelsBtn" class="field-action-btn" style="font-size:11px;padding:3px 10px;">Fetch /v1/models</button>
                     </div>
                     <textarea id="extProvModelsList" rows="3" placeholder="model-id: Display Alias (one per line)&#10;e.g.&#10;llama-3.3-70b-versatile: Llama 3.3 70B&#10;deepseek-r1: DeepSeek R1 Thinking"></textarea>
-                    <span class="field-hint">Specify models manually or click "Fetch /v1/models" to query the provider endpoint. Format: model_id: Optional Display Name.</span>
+                    <span class="field-hint">Specify models manually or click "Fetch /v1/models".</span>
                   </div>
 
                   <button type="button" id="addExternalProviderBtn" class="add-mcp-btn">+ Add Provider</button>
                 </div>
               </div>
+            </div>
+
+            <!-- Sub-Card 2: MCP Servers -->
+            <div class="settings-card">
+              <div class="card-header mcp-card-header">
+                <div>
+                  <h4 class="card-title">MCP Servers (Model Context Protocol)</h4>
+                  <p class="card-desc">Extensible tool and data integrations loaded into Antigravity</p>
+                </div>
+                <button type="button" id="resetMcpDefaultsBtn" class="mcp-reset-btn" title="Restore default MCP servers">Restore Defaults</button>
+              </div>
+              <div class="card-content">
+                <div class="mcp-servers-list" id="mcpServersList">
+                  <!-- Populated dynamically -->
+                </div>
+
+                <div class="add-mcp-box">
+                  <span class="add-mcp-title">Add Custom MCP Server</span>
+                  <div class="setting-field">
+                    <label for="newMcpName">Server Name</label>
+                    <input type="text" id="newMcpName" placeholder="e.g. filesystem-server, web-scraper">
+                  </div>
+                  <div class="setting-field">
+                    <label for="newMcpTransport">Transport</label>
+                    <select id="newMcpTransport">
+                      <option value="stdio" selected>Stdio Command Line</option>
+                      <option value="sse">SSE Server Sent Events</option>
+                      <option value="http">HTTP Stream</option>
+                    </select>
+                  </div>
+                  <div class="setting-field">
+                    <label for="newMcpCommand">Command / URL</label>
+                    <input type="text" id="newMcpCommand" placeholder="npx -y @modelcontextprotocol/server-... or http://...">
+                  </div>
+                  <button type="button" id="addMcpServerBtn" class="add-mcp-btn">+ Add Server</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-Card 3: Shadow Mode & Power Management -->
+            <div class="settings-card shadow-card" id="shadowSettingsCard">
+              <div class="card-header shadow-card-header">
+                <div>
+                  <h4 class="card-title">Shadow Mode & Power Management</h4>
+                  <p class="card-desc">Persistent background daemon, OS sleep prevention, and wake alarms</p>
+                </div>
+                <span id="shadowStatusPill" class="shadow-status-pill ready">Shadow Ready</span>
+              </div>
+              <div class="card-content">
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Background Execution (Shadow Mode)</span>
+                    <span class="toggle-desc">Keeps background tasks running smoothly even when the browser is minimized.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingShadowEnabled" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Keep System Awake</span>
+                    <span class="toggle-desc">Prevents computer sleep or idle network throttling while tasks are executing.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingShadowPreventSleep" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Scheduled Wake Timer</span>
+                    <span class="toggle-desc">Wakes the computer from sleep mode to run scheduled background tasks.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingShadowAutoWake" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field">
+                  <label for="settingShadowOnComplete">Action on Task Completion</label>
+                  <select id="settingShadowOnComplete">
+                    <option value="none">Keep running</option>
+                    <option value="sleep" selected>Sleep PC</option>
+                    <option value="hibernate">Hibernate PC</option>
+                    <option value="shutdown">Shutdown PC</option>
+                  </select>
+                </div>
+
+                <div class="shadow-power-actions">
+                  <div class="shadow-actions-title">Direct Power Controls</div>
+                  <div class="shadow-actions-grid">
+                    <button type="button" id="shadowSleepNowBtn" class="shadow-power-btn sleep-btn" title="Put computer to sleep now">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                      <span>Sleep PC</span>
+                    </button>
+                    <button type="button" id="shadowShutdownNowBtn" class="shadow-power-btn shutdown-btn" title="Shut down computer with 30s countdown">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></svg>
+                      <span>Shutdown PC</span>
+                    </button>
+                    <button type="button" id="shadowTestWakeBtn" class="shadow-power-btn wake-btn" title="Schedule test wake alarm in 2 minutes">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      <span>Wake in 2m</span>
+                    </button>
+                    <button type="button" id="shadowCancelShutdownBtn" class="shadow-power-btn cancel-btn hidden" title="Cancel pending shutdown">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                      <span>Cancel Shutdown</span>
+                    </button>
+                  </div>
+                  <div id="shadowActionFeedback" class="shadow-feedback-msg hidden"></div>
+                </div>
+              </div>
               <div class="card-footer">
-                <button type="button" class="save-settings-btn tab-save-btn">Save</button>
+                <button type="button" class="save-settings-btn tab-save-btn">Save Features</button>
               </div>
             </div>
           </div>
+
+          <!-- Tab 4: User & Skills (Profile & Reusable Skills) -->
+          <div class="settings-tab-content hidden" id="tabContent-user">
+            <!-- Profile Card -->
+            <div class="settings-card">
+              <div class="card-header">
+                <h4 class="card-title">User Profile</h4>
+                <p class="card-desc">How Antigravity greets and collaborates with you</p>
+              </div>
+              <div class="card-content">
+                <div class="setting-field">
+                  <label for="settingUserName">Your Full Name</label>
+                  <input type="text" id="settingUserName" placeholder="e.g. Developer">
+                </div>
+
+                <div class="setting-field">
+                  <label for="settingUserNick">Nickname</label>
+                  <input type="text" id="settingUserNick" placeholder="e.g. Matias">
+                </div>
+
+                <div class="setting-field">
+                  <label>Skill File Import (.md / .json)</label>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="file" id="skillFileInput" accept=".md,.json,.txt" style="display:none;">
+                    <button type="button" id="uploadSkillBtn" class="upload-skill-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      <span>Import Skill File</span>
+                    </button>
+                    <span id="activeSkillStatus" class="active-skill-label">No file imported</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom Reusable Skills Card -->
+            <div class="settings-card">
+              <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <h4 class="card-title">Custom Reusable Skills (<code>/skill</code>)</h4>
+                  <p class="card-desc">Reusable task templates you can trigger anytime with a <code>/</code> command</p>
+                </div>
+                <button type="button" id="openCreateSkillModalBtn" class="field-action-btn" style="background:#00f2fe;color:#09090b;font-weight:600;padding:5px 12px;border:none;">+ New Skill</button>
+              </div>
+              <div class="card-content">
+                <div id="customSkillsList" class="custom-skills-container">
+                  <!-- Populated dynamically -->
+                </div>
+                <div class="skills-helper-hint" style="font-size:11.5px;color:#71717a;margin-top:6px;">
+                  💡 <strong>Tip:</strong> You can also type <code>/skill</code> directly in the chat at any time to turn your current task into a reusable skill!
+                </div>
+              </div>
+              <div class="card-footer">
+                <button type="button" class="save-settings-btn tab-save-btn">Save Profile</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Reusable Skill Modal (/skill) -->
+    <div id="skillCreatorModal" class="chatgpt-modal hidden">
+      <div class="modal-dialog skill-creator-dialog">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <h3>⚡ Create Reusable Skill</h3>
+            <p class="modal-subtitle">Turn any task or multi-step workflow into a repeatable / command</p>
+          </div>
+          <button id="closeSkillCreatorBtn" class="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body" style="padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+          <div class="setting-field">
+            <label for="newSkillName">Skill Name / Identifier</label>
+            <input type="text" id="newSkillName" placeholder="e.g. summarize-news, extract-table, search-deals">
+            <span class="field-hint">Command will be: <code id="newSkillCommandPreview">/my-skill</code></span>
+          </div>
+          <div class="setting-field">
+            <label for="newSkillDesc">Short Description</label>
+            <input type="text" id="newSkillDesc" placeholder="e.g. Analyzes the active page and generates an executive summary">
+          </div>
+          <div class="setting-field">
+            <label for="newSkillPrompt">Task Instructions / Prompt Template</label>
+            <textarea id="newSkillPrompt" rows="4" placeholder="Enter the exact instructions the agent should execute when this skill is invoked..."></textarea>
+          </div>
+          <div class="setting-field">
+            <label for="newSkillMode">Execution Mode</label>
+            <select id="newSkillMode">
+              <option value="chat" selected>Chat Mode (Fast analysis & answers)</option>
+              <option value="cowork">Cowork Mode (Autonomous browser actions & clicks)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer" style="padding: 12px 16px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
+          <button type="button" id="cancelSkillCreatorBtn" class="field-action-btn" style="padding: 7px 16px; background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #d4d4d8;">Cancel</button>
+          <button type="button" id="saveSkillModalBtn" class="save-settings-btn" style="padding: 7px 20px; font-weight: 600;">Save Skill</button>
         </div>
       </div>
     </div>
