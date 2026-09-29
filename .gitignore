@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+Thumbs.db
+*.key
+*.pem
+dist/
+coverage/
+.cache/
+.vscode/
+search_script.ps1

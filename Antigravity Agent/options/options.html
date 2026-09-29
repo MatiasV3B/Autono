@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Configuración - Antigravity Agent</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-card">
+    <div class="options-header">
+      <img src="../assets/icon-128.png" alt="Antigravity Logo" class="logo">
+      <div>
+        <h2>Antigravity Agent</h2>
+        <p>Configuración del puente local y modelos</p>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-group">
+        <label for="bridgeUrl">URL de Antigravity Bridge (FastAPI):</label>
+        <input type="text" id="bridgeUrl" value="http://127.0.0.1:8000">
+        <span class="help-text">El servidor local debe estar activo. Puedes cambiar el puerto si usas uno personalizado.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="defaultModel">Modelo Predeterminado:</label>
+        <select id="defaultModel">
+          <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Medium) — Recomendado</option>
+          <option value="gemini-3.8-flash-high">Gemini 3.8 Flash (High)</option>
+          <option value="gemini-3.8-flash-low">Gemini 3.8 Flash (Low)</option>
+          <option value="gemini-3.7-flash-medium">Gemini 3.7 Flash (Medium)</option>
+          <option value="gemini-3.7-flash-high">Gemini 3.7 Flash (High)</option>
+          <option value="gemini-3.7-flash-low">Gemini 3.7 Flash (Low)</option>
+          <option value="gemini-3.6-flash-medium">Gemini 3.6 Flash (Medium)</option>
+          <option value="gemini-3.6-flash-high">Gemini 3.6 Flash (High)</option>
+          <option value="gemini-3.6-flash-low">Gemini 3.6 Flash (Low)</option>
+          <option value="gemini-3.1-pro-high">Gemini 3.1 Pro (High)</option>
+          <option value="gemini-3.1-pro-low">Gemini 3.1 Pro (Low)</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Thinking)</option>
+          <option value="claude-opus-4-6-thinking">Claude Opus 4.6 (Thinking)</option>
+          <option value="gpt-oss-120b-medium">GPT-OSS 120B (Medium)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="temperature">Creatividad (Temperature):</label>
+        <input type="range" id="temperature" min="0" max="1" step="0.05" value="0.2">
+        <span id="tempValue" class="help-text">0.20 (Más enfocado y preciso)</span>
+      </div>
+
+      <div class="form-group">
+        <label for="maxOutputTokens">Límite de Tokens de Salida (Output):</label>
+        <select id="maxOutputTokens">
+          <option value="65536" selected>Ilimitado / Máximo (65,536 tokens)</option>
+          <option value="32768">32,768 tokens</option>
+          <option value="16384">16,384 tokens</option>
+          <option value="8192">8,192 tokens</option>
+        </select>
+        <span class="help-text">Longitud máxima de tokens para respuestas completas y sin cortes.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="maxSteps">Límite de Pasos en Modo Cowork:</label>
+        <input type="number" id="maxSteps" value="30" min="5" max="100">
+        <span class="help-text">Máximo de acciones autónomas que el agente puede realizar por meta.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="limitSonnet">Límite Claude Sonnet 4.6 (mensajes / 5h):</label>
+        <input type="number" id="limitSonnet" value="45" min="1" max="500">
+        <span class="help-text">Ventana rodante de 5 horas para Claude Sonnet.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="limitOpus">Límite Claude Opus 4.6 (mensajes / 5h):</label>
+        <input type="number" id="limitOpus" value="20" min="1" max="500">
+        <span class="help-text">Ventana estricta de 5 horas para Claude Opus.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="limitGpt">Límite GPT-OSS 120B (mensajes / 3h):</label>
+        <input type="number" id="limitGpt" value="80" min="1" max="500">
+        <span class="help-text">Ventana rodante de 3 horas para modelos GPT/OSS.</span>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div id="bridgeStatusNotice" class="status-notice">Verificando conexión con http://127.0.0.1:8000...</div>
+      <button id="testConnectionBtn" class="secondary-btn">Probar Conexión</button>
+    </div>
+
+    <div class="options-footer">
+      <button id="saveBtn" class="primary-btn">Guardar Configuración</button>
+      <span id="savedNotice" class="saved-notice hidden">¡Guardado con éxito!</span>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

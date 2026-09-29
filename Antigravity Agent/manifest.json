@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "Antigravity Agent",
+  "version": "1.0.0",
+  "description": "Agente de IA y copiloto de navegación con modos Chat y Cowork conectado a Antigravity Bridge local (Gemini 3.8, Claude).",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_icon": "assets/icon-32.png",
+    "default_title": "Abrir Antigravity Agent"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "windows": "Alt+Shift+C",
+        "mac": "Command+Shift+C"
+      },
+      "description": "Abrir Antigravity Agent"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "side-panel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "<all_urls>"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "tabGroups",
+    "debugger",
+    "unlimitedStorage",
+    "webNavigation",
+    "notifications",
+    "sidePanel",
+    "power",
+    "alarms",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*"
+  ],
+  "options_page": "options/options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*",
+        "domExtractor.js",
+        "buildDomTree.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
