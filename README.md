@@ -85,11 +85,11 @@ Follow these steps to set up your environment:
 - **Git** installed on your system.
 
 ### 2. Start the Local Antigravity Bridge Server
-Autono communicates with the local **Antigravity Bridge** server running on `http://127.0.0.1:8000`.
+Autono communicates with the local [**Antigravity Bridge**](https://github.com/MatiasV3B/AntigravityBridge) server running on `http://127.0.0.1:8000`.
 
-1. Clone and navigate to the Antigravity Bridge repository:
+1. Clone and navigate to the official [Antigravity Bridge](https://github.com/MatiasV3B/AntigravityBridge) repository:
    ```bash
-   git clone https://github.com/your-username/AntigravityBridge.git
+   git clone https://github.com/MatiasV3B/AntigravityBridge.git
    cd AntigravityBridge
    ```
 2. Install dependencies:
@@ -99,11 +99,11 @@ Autono communicates with the local **Antigravity Bridge** server running on `htt
 3. Start the server:
    - On Windows: Run `Iniciar-AntigravityBridge.bat` or:
      ```powershell
-     python -m server.app
+     python main.py
      ```
-   - On Linux/macOS:
+   - On Linux/macOS (Headless):
      ```bash
-     python -m server.app
+     python main.py --headless --host 127.0.0.1 --port 8000
      ```
 4. Verify the server is running by opening `http://127.0.0.1:8000/health` in your browser. You should receive a JSON status response (`{"status": "ok"}`).
 
@@ -186,7 +186,7 @@ cd AntigravityBridge
 git pull origin main
 pip install -r requirements.txt --upgrade
 ```
-Restart the bridge process (`Iniciar-AntigravityBridge.bat` or `python -m server.app`).
+Restart the bridge process (`Iniciar-AntigravityBridge.bat` or `python main.py`).
 
 ---
 
