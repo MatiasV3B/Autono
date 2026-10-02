@@ -22,7 +22,7 @@
 1. **Google Antigravity**:
    - **Local Terminal**: Local CLI execution via the local bridge.
    - **Gemini API**: Direct connection using your Google Gemini API key (for native Gemini models).
-   - *Models*: Gemini 3.8 Flash (Ultra Fast · Recommended), Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro, GPT-OSS 120B (Open-Weights MoE via Local Terminal).
+   - *Models*: Gemini 3.8 Flash (Ultra Fast · Recommended), Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro, GPT-OSS 120B (Local Terminal / OpenAI API).
 2. **Anthropic Claude**:
    - **Local Terminal**: Terminal-driven local execution.
    - **Claude API**: Direct connection using your Anthropic API key (never via Gemini API).
