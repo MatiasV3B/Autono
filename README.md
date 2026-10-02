@@ -110,8 +110,8 @@ Autono communicates with the local **Antigravity Bridge** server running on `htt
 ### 3. Install the Extension in Chrome
 1. Clone this repository (if you haven't already):
    ```bash
-   git clone https://github.com/your-username/autono.git
-   cd autono
+   git clone https://github.com/MatiasV3B/Autono.git
+   cd Autono
    ```
 2. Open Chrome and go to `chrome://extensions` in the address bar.
 3. Turn on the **Developer mode** switch in the top-right corner.
