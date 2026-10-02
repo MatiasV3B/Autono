@@ -1,6 +1,6 @@
-# Autono
-
 <div align="center">
+  <img src="Autono/assets/autono-logo.png" alt="Autono Logo" width="128" style="border-radius: 24px; margin-bottom: 8px;" />
+  <h1>Autono</h1>
   <h3>⚡ Autonomous AI Browser Agent & Navigation Copilot</h3>
   <p>
     <img src="https://img.shields.io/badge/Chrome_Extension-Manifest_V3-38bdf8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Manifest V3" />
@@ -21,11 +21,11 @@
 
 1. **Google Antigravity**:
    - **Local Terminal**: Local CLI execution via the local bridge.
-   - **Gemini API**: Direct connection using your Google Gemini API key.
-   - *Models*: Gemini 3.8 Flash (Ultra Fast · Recommended), Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro, GPT-OSS 120B (Open-Weights MoE).
+   - **Gemini API**: Direct connection using your Google Gemini API key (for native Gemini models).
+   - *Models*: Gemini 3.8 Flash (Ultra Fast · Recommended), Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro, GPT-OSS 120B (Open-Weights MoE via Local Terminal).
 2. **Anthropic Claude**:
    - **Local Terminal**: Terminal-driven local execution.
-   - **Claude API**: Direct connection using your Anthropic API key.
+   - **Claude API**: Direct connection using your Anthropic API key (never via Gemini API).
    - *Models*: Claude Sonnet 5.5, Claude Opus 5.5, Claude Fable 5.1, Claude Haiku 4.5, Claude Sonnet 4.6, Claude Opus 4.6.
 3. **OpenAI & Codex**:
    - **Local Terminal**: Local CLI environment.

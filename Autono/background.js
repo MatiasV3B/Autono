@@ -80,6 +80,22 @@ async function getExternalProviders() {
   }
 }
 
+function getProviderModes(modelName, settings) {
+  const isClaude = typeof modelName === 'string' && (modelName.toLowerCase().includes('claude') || modelName.toLowerCase().includes('opus') || modelName.toLowerCase().includes('sonnet') || modelName.toLowerCase().includes('haiku') || modelName.toLowerCase().includes('fable'));
+  const isGptOss = typeof modelName === 'string' && modelName.toLowerCase().includes('oss');
+  const isGemini = !isClaude && !isGptOss && typeof modelName === 'string' && modelName.toLowerCase().includes('gemini');
+
+  return {
+    antigravity_mode: isGemini ? (settings.antigravityMode || 'desktop') : 'desktop',
+    gemini_api_key: isGemini ? (settings.geminiApiKey || undefined) : undefined,
+    claude_mode: isClaude ? (settings.claudeMode || 'desktop') : undefined,
+    anthropic_api_key: isClaude ? (settings.anthropicApiKey || undefined) : undefined,
+    api_key: isClaude ? (settings.anthropicApiKey || undefined) : undefined,
+    openai_mode: (!isClaude && !isGemini) ? (settings.openaiMode || 'desktop') : undefined,
+    openai_api_key: (!isClaude && !isGemini) ? (settings.openaiApiKey || undefined) : undefined,
+  };
+}
+
 async function resolveInferenceEndpoint(modelName, defaultBase) {
   const settings = await getSettings();
   if (!modelName) {
@@ -110,12 +126,22 @@ async function resolveInferenceEndpoint(modelName, defaultBase) {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer sk-antigravity',
   };
-  if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
-  if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
-  if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
-  if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
-  if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
-  if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
+  const isClaude = typeof modelName === 'string' && (modelName.toLowerCase().includes('claude') || modelName.toLowerCase().includes('opus') || modelName.toLowerCase().includes('sonnet') || modelName.toLowerCase().includes('haiku') || modelName.toLowerCase().includes('fable'));
+  const isGptOss = typeof modelName === 'string' && modelName.toLowerCase().includes('oss');
+  const isGemini = !isClaude && !isGptOss && typeof modelName === 'string' && modelName.toLowerCase().includes('gemini');
+
+  if (isGemini) {
+    if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
+    if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
+  }
+  if (isClaude) {
+    if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
+    if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
+  }
+  if (!isClaude && !isGemini) {
+    if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
+    if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
+  }
 
   return {
     url: `${defaultBase}/v1/chat/completions`,
@@ -1138,13 +1164,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       temperature: settings.temperature || 0.2,
       max_tokens: settings.maxOutputTokens || 65536,
       max_output_tokens: settings.maxOutputTokens || 65536,
-      antigravity_mode: settings.antigravityMode || 'desktop',
-      gemini_api_key: settings.geminiApiKey || undefined,
-      claude_mode: settings.claudeMode || 'desktop',
-      anthropic_api_key: settings.anthropicApiKey || undefined,
-      api_key: settings.anthropicApiKey || undefined,
-      openai_mode: settings.openaiMode || 'desktop',
-      openai_api_key: settings.openaiApiKey || undefined,
+      ...getProviderModes(resolvedModel, settings),
       reasoning_effort: thinkingEffort || undefined,
       thinking_budget: thinkingBudget,
     };
@@ -1402,13 +1422,7 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
-          antigravity_mode: settings.antigravityMode || 'desktop',
-          gemini_api_key: settings.geminiApiKey || undefined,
-          claude_mode: settings.claudeMode || 'desktop',
-          anthropic_api_key: settings.anthropicApiKey || undefined,
-          api_key: settings.anthropicApiKey || undefined,
-          openai_mode: settings.openaiMode || 'desktop',
-          openai_api_key: settings.openaiApiKey || undefined,
+          ...getProviderModes(resolvedPlanModel, settings),
         }),
         signal: abortController.signal,
       });
@@ -1577,13 +1591,7 @@ You MUST reply ONLY with a JSON block with this strict format:
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
-          antigravity_mode: settings.antigravityMode || 'desktop',
-          gemini_api_key: settings.geminiApiKey || undefined,
-          claude_mode: settings.claudeMode || 'desktop',
-          anthropic_api_key: settings.anthropicApiKey || undefined,
-          api_key: settings.anthropicApiKey || undefined,
-          openai_mode: settings.openaiMode || 'desktop',
-          openai_api_key: settings.openaiApiKey || undefined,
+          ...getProviderModes(resolvedStepModel, settings),
         }),
         signal: abortController.signal,
       });
@@ -1779,13 +1787,7 @@ Formatting instructions:
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
-          antigravity_mode: settings.antigravityMode || 'desktop',
-          gemini_api_key: settings.geminiApiKey || undefined,
-          claude_mode: settings.claudeMode || 'desktop',
-          anthropic_api_key: settings.anthropicApiKey || undefined,
-          api_key: settings.anthropicApiKey || undefined,
-          openai_mode: settings.openaiMode || 'desktop',
-          openai_api_key: settings.openaiApiKey || undefined,
+          ...getProviderModes(resolvedRepModel, settings),
         }),
         signal: abortController.signal,
       });

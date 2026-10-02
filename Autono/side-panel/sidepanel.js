@@ -1525,8 +1525,24 @@ marked.setOptions({
       </button>
     `).join('');
 
+    const isGptOss = model.id === 'gpt-oss-120b-medium';
     let engineModeHtml = '';
-    if (isClaudeFamily) {
+    if (isGptOss) {
+      engineModeHtml = `
+        <div class="preview-config-section" style="margin-top:8px;">
+          <div class="preview-config-label">EXECUTION ENGINE</div>
+          <div class="preview-config-sub">Open-Source Engine</div>
+          <div class="segmented-radio-group" style="display:grid;grid-template-columns:1fr;gap:4px;">
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn active" style="cursor:default;" title="GPT-OSS runs locally via local bridge/terminal (not available via Gemini API)">
+              💻 Local Terminal (Open-Weights)
+            </button>
+          </div>
+          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="gptOssModePreviewNote">
+            🟢 Local Terminal active. Open-source weights run via local Bridge (not available via Gemini API).
+          </div>
+        </div>
+      `;
+    } else if (isClaudeFamily) {
       engineModeHtml = `
         <div class="preview-config-section" style="margin-top:8px;">
           <div class="preview-config-label">EXECUTION ENGINE</div>
