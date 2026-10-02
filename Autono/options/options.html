@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Configuración - Antigravity Agent</title>
+  <title>Settings - Autono</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
   <div class="options-card">
     <div class="options-header">
-      <img src="../assets/icon-128.png" alt="Antigravity Logo" class="logo">
+      <img src="../assets/icon-128.png" alt="Autono Logo" class="logo">
       <div>
-        <h2>Antigravity Agent</h2>
-        <p>Configuración del puente local y modelos</p>
+        <h2>Autono</h2>
+        <p>Local Bridge configuration and model routing</p>
       </div>
     </div>
 
@@ -81,6 +81,45 @@
         <label for="limitGpt">Límite GPT-OSS 120B (mensajes / 3h):</label>
         <input type="number" id="limitGpt" value="80" min="1" max="500">
         <span class="help-text">Ventana rodante de 3 horas para modelos GPT/OSS.</span>
+      </div>
+
+      <div class="form-group">
+        <label for="antigravityMode">Execution Engine (Antigravity):</label>
+        <select id="antigravityMode">
+          <option value="desktop" selected>Local Terminal (Local Bridge / CLI)</option>
+          <option value="api">Gemini API (Direct Google Gemini Key)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="geminiApiKeyGroup">
+        <label for="geminiApiKey">Google Gemini API Key:</label>
+        <input type="password" id="geminiApiKey" placeholder="AIzaSy...">
+      </div>
+
+      <div class="form-group">
+        <label for="claudeMode">Execution Engine (Claude):</label>
+        <select id="claudeMode">
+          <option value="desktop" selected>Local Terminal (Local CLI / Terminal)</option>
+          <option value="api">Claude API (Direct Anthropic Key)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="anthropicApiKeyGroup">
+        <label for="anthropicApiKey">Anthropic API Key (Claude API):</label>
+        <input type="password" id="anthropicApiKey" placeholder="sk-ant-api03-...">
+      </div>
+
+      <div class="form-group">
+        <label for="openaiMode">Execution Engine (OpenAI):</label>
+        <select id="openaiMode">
+          <option value="desktop" selected>Local Terminal (Local CLI)</option>
+          <option value="api">ChatGPT API (Direct OpenAI Key)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="openaiApiKeyGroup">
+        <label for="openaiApiKey">OpenAI API Key (ChatGPT API):</label>
+        <input type="password" id="openaiApiKey" placeholder="sk-proj-...">
       </div>
     </div>
 

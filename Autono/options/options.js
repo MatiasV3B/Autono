@@ -16,6 +16,12 @@
   const limitSonnetInput = document.getElementById('limitSonnet');
   const limitOpusInput = document.getElementById('limitOpus');
   const limitGptInput = document.getElementById('limitGpt');
+  const antigravityModeSelect = document.getElementById('antigravityMode');
+  const geminiApiKeyInput = document.getElementById('geminiApiKey');
+  const claudeModeSelect = document.getElementById('claudeMode');
+  const anthropicApiKeyInput = document.getElementById('anthropicApiKey');
+  const openaiModeSelect = document.getElementById('openaiMode');
+  const openaiApiKeyInput = document.getElementById('openaiApiKey');
   const saveBtn = document.getElementById('saveBtn');
   const savedNotice = document.getElementById('savedNotice');
 
@@ -24,7 +30,16 @@
   });
 
   async function loadSettings() {
-    const data = await chrome.storage.local.get(['antigravity_settings', 'antigravity_custom_limits']);
+    const data = await chrome.storage.local.get([
+      'antigravity_settings',
+      'antigravity_custom_limits',
+      'antigravity_antigravity_mode',
+      'antigravity_gemini_api_key',
+      'antigravity_claude_mode',
+      'antigravity_anthropic_api_key',
+      'antigravity_openai_mode',
+      'antigravity_openai_api_key'
+    ]);
     const s = data.antigravity_settings || {};
     const limits = data.antigravity_custom_limits || {};
 
@@ -38,6 +53,15 @@
     if (s.maxOutputTokens && maxOutputTokensInput) {
       maxOutputTokensInput.value = s.maxOutputTokens;
     }
+
+    if (antigravityModeSelect) antigravityModeSelect.value = s.antigravityMode || data.antigravity_antigravity_mode || 'desktop';
+    if (geminiApiKeyInput) geminiApiKeyInput.value = s.geminiApiKey || data.antigravity_gemini_api_key || '';
+
+    if (claudeModeSelect) claudeModeSelect.value = s.claudeMode || data.antigravity_claude_mode || 'desktop';
+    if (anthropicApiKeyInput) anthropicApiKeyInput.value = s.anthropicApiKey || data.antigravity_anthropic_api_key || '';
+
+    if (openaiModeSelect) openaiModeSelect.value = s.openaiMode || data.antigravity_openai_mode || 'desktop';
+    if (openaiApiKeyInput) openaiApiKeyInput.value = s.openaiApiKey || data.antigravity_openai_api_key || '';
 
     if (limitSonnetInput) limitSonnetInput.value = limits['claude-sonnet-4-6'] || 45;
     if (limitOpusInput) limitOpusInput.value = limits['claude-opus-4-6-thinking'] || 20;
@@ -85,6 +109,12 @@
       temperature: parseFloat(tempInput.value),
       maxSteps: parseInt(maxStepsInput.value, 10) || 20,
       maxOutputTokens: parseInt(maxOutputTokensInput.value, 10) || 65536,
+      antigravityMode: antigravityModeSelect ? antigravityModeSelect.value : 'desktop',
+      geminiApiKey: geminiApiKeyInput ? geminiApiKeyInput.value.trim() : '',
+      claudeMode: claudeModeSelect ? claudeModeSelect.value : 'desktop',
+      anthropicApiKey: anthropicApiKeyInput ? anthropicApiKeyInput.value.trim() : '',
+      openaiMode: openaiModeSelect ? openaiModeSelect.value : 'desktop',
+      openaiApiKey: openaiApiKeyInput ? openaiApiKeyInput.value.trim() : '',
     };
 
     const customLimits = {
@@ -96,7 +126,28 @@
     await chrome.storage.local.set({
       antigravity_settings: settings,
       antigravity_custom_limits: customLimits,
+      antigravity_antigravity_mode: settings.antigravityMode,
+      antigravity_gemini_api_key: settings.geminiApiKey,
+      antigravity_claude_mode: settings.claudeMode,
+      antigravity_anthropic_api_key: settings.anthropicApiKey,
+      antigravity_openai_mode: settings.openaiMode,
+      antigravity_openai_api_key: settings.openaiApiKey,
     });
+
+    try {
+      fetch(`${settings.bridgeUrl}/api/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          antigravity_mode: settings.antigravityMode,
+          gemini_api_key: settings.geminiApiKey,
+          claude_mode: settings.claudeMode,
+          anthropic_api_key: settings.anthropicApiKey,
+          openai_mode: settings.openaiMode,
+          openai_api_key: settings.openaiApiKey,
+        }),
+      }).catch(() => null);
+    } catch (_) {}
 
     savedNotice.classList.remove('hidden');
     setTimeout(() => {

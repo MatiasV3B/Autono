@@ -36,11 +36,25 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 }
 
 async function getSettings() {
-  const data = await chrome.storage.local.get('antigravity_settings');
+  const data = await chrome.storage.local.get([
+    'antigravity_settings',
+    'antigravity_antigravity_mode',
+    'antigravity_gemini_api_key',
+    'antigravity_claude_mode',
+    'antigravity_anthropic_api_key',
+    'antigravity_openai_mode',
+    'antigravity_openai_api_key'
+  ]);
   const s = data.antigravity_settings || {};
   return {
     bridgeUrl: s.bridgeUrl || DEFAULT_BRIDGE_URL,
     selectedModel: s.selectedModel || DEFAULT_MODEL,
+    antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
+    geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
+    claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
+    anthropicApiKey: s.anthropicApiKey || data.antigravity_anthropic_api_key || '',
+    openaiMode: s.openaiMode || data.antigravity_openai_mode || 'desktop',
+    openaiApiKey: s.openaiApiKey || data.antigravity_openai_api_key || '',
     temperature: s.temperature !== undefined ? s.temperature : 0.2,
     autoCaptureScreenshot: !!s.autoCaptureScreenshot,
     maxSteps: s.maxSteps || 30,
@@ -67,7 +81,17 @@ async function getExternalProviders() {
 }
 
 async function resolveInferenceEndpoint(modelName, defaultBase) {
-  if (!modelName) return { url: `${defaultBase}/v1/chat/completions`, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer sk-antigravity' }, model: DEFAULT_MODEL };
+  const settings = await getSettings();
+  if (!modelName) {
+    const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer sk-antigravity' };
+    if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
+    if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
+    if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
+    if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
+    if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
+    if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
+    return { url: `${defaultBase}/v1/chat/completions`, headers, model: DEFAULT_MODEL };
+  }
   const extProviders = await getExternalProviders();
   for (const prov of extProviders) {
     const hasModel = (prov.models || []).some(m => m.id === modelName);
@@ -82,21 +106,67 @@ async function resolveInferenceEndpoint(modelName, defaultBase) {
       return { url, headers, model: actualModel };
     }
   }
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer sk-antigravity',
+  };
+  if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
+  if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
+  if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
+  if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
+  if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
+  if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
+
   return {
     url: `${defaultBase}/v1/chat/completions`,
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer sk-antigravity' },
+    headers,
     model: modelName,
   };
 }
 
-// ─── Context Menu (Right-Click: Ask Antigravity Anywhere) ────────────────────
+// ─── Dynamic Extension Action Icon ──────────────────────────────────────────
+function updateExtensionIcon(modelId) {
+  const isClaude = typeof modelId === 'string' && modelId.toLowerCase().includes('claude');
+  const path = isClaude ? {
+    "16": "assets/claude-icon-16.png",
+    "32": "assets/claude-icon-32.png",
+    "48": "assets/claude-icon-48.png",
+    "128": "assets/claude-icon-128.png"
+  } : {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  };
+  try {
+    if (chrome.action && chrome.action.setIcon) {
+      chrome.action.setIcon({ path }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    }
+  } catch (err) {
+    console.warn('Could not set extension icon:', err);
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.antigravity_base_model) {
+      updateExtensionIcon(changes.antigravity_base_model.newValue);
+    } else if (changes.antigravity_default_model) {
+      updateExtensionIcon(changes.antigravity_default_model.newValue);
+    }
+  }
+});
+
+// ─── Context Menu (Right-Click: Ask Autono Anywhere) ────────────────────────
 function setupContextMenus() {
   try {
     if (!chrome.contextMenus) return;
     chrome.contextMenus.removeAll(() => {
       chrome.contextMenus.create({
         id: 'antigravity_ask_page',
-        title: 'Ask Antigravity',
+        title: 'Ask Autono',
         contexts: ['page', 'frame', 'link', 'image', 'selection']
       });
     });
@@ -107,10 +177,16 @@ function setupContextMenus() {
 
 chrome.runtime.onInstalled.addListener(() => {
   setupContextMenus();
+  chrome.storage.local.get(['antigravity_base_model', 'antigravity_default_model'], (data) => {
+    updateExtensionIcon(data?.antigravity_base_model || data?.antigravity_default_model || DEFAULT_MODEL);
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenus();
+  chrome.storage.local.get(['antigravity_base_model', 'antigravity_default_model'], (data) => {
+    updateExtensionIcon(data?.antigravity_base_model || data?.antigravity_default_model || DEFAULT_MODEL);
+  });
 });
 
 chrome.contextMenus?.onClicked?.addListener(async (info, tab) => {
@@ -878,7 +954,7 @@ async function getPageContext(tabId, includeScreenshot = false) {
 }
 
 // ─── Mode 1: Chat Execution (Fast, Full-Screen JSON, Streaming) ─────────────
-async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId) {
+async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
   const abortController = new AbortController();
@@ -899,7 +975,7 @@ async function handleChatStream(taskId, sessionId, userText, modelName, includeS
     const { screenData, screenshotDataUrl } = await getPageContext(tabId, includeScreenshot);
 
     // 2. Build Messages with explicit CoT prompt and strict Markdown / LaTeX
-    const systemPrompt = `You are Antigravity Agent, an advanced AI model connected to Antigravity Bridge and running as a copilot in Google Chrome.
+    const systemPrompt = `You are Autono, an advanced autonomous AI browser agent and navigation copilot connected to local Antigravity Bridge and running in Google Chrome.
 Your goal is to solve whatever the user requests with maximum precision, depth, completeness, and clarity.
 
 CRITICAL CONTROL DIRECTIVE (STRICT SUBAGENT PROHIBITION):
@@ -1039,6 +1115,19 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
     const targetModel = modelName || settings.selectedModel || DEFAULT_MODEL;
     const { url: endpointUrl, headers: endpointHeaders, model: resolvedModel } = await resolveInferenceEndpoint(targetModel, base);
 
+    const effortMap = {
+      'fast': 0,
+      'low': 1024,
+      'medium': 4096,
+      'thinking': 4096,
+      'high': 8192,
+      'x-high': 16384,
+      'max': 32768,
+    };
+    const thinkingBudget = (thinkingEffort && effortMap[thinkingEffort] !== undefined)
+      ? effortMap[thinkingEffort]
+      : undefined;
+
     const payload = {
       model: resolvedModel,
       messages: [
@@ -1049,6 +1138,15 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       temperature: settings.temperature || 0.2,
       max_tokens: settings.maxOutputTokens || 65536,
       max_output_tokens: settings.maxOutputTokens || 65536,
+      antigravity_mode: settings.antigravityMode || 'desktop',
+      gemini_api_key: settings.geminiApiKey || undefined,
+      claude_mode: settings.claudeMode || 'desktop',
+      anthropic_api_key: settings.anthropicApiKey || undefined,
+      api_key: settings.anthropicApiKey || undefined,
+      openai_mode: settings.openaiMode || 'desktop',
+      openai_api_key: settings.openaiApiKey || undefined,
+      reasoning_effort: thinkingEffort || undefined,
+      thinking_budget: thinkingBudget,
     };
 
     const response = await fetch(endpointUrl, {
@@ -1304,6 +1402,13 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
+          antigravity_mode: settings.antigravityMode || 'desktop',
+          gemini_api_key: settings.geminiApiKey || undefined,
+          claude_mode: settings.claudeMode || 'desktop',
+          anthropic_api_key: settings.anthropicApiKey || undefined,
+          api_key: settings.anthropicApiKey || undefined,
+          openai_mode: settings.openaiMode || 'desktop',
+          openai_api_key: settings.openaiApiKey || undefined,
         }),
         signal: abortController.signal,
       });
@@ -1472,6 +1577,13 @@ You MUST reply ONLY with a JSON block with this strict format:
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
+          antigravity_mode: settings.antigravityMode || 'desktop',
+          gemini_api_key: settings.geminiApiKey || undefined,
+          claude_mode: settings.claudeMode || 'desktop',
+          anthropic_api_key: settings.anthropicApiKey || undefined,
+          api_key: settings.anthropicApiKey || undefined,
+          openai_mode: settings.openaiMode || 'desktop',
+          openai_api_key: settings.openaiApiKey || undefined,
         }),
         signal: abortController.signal,
       });
@@ -1667,6 +1779,13 @@ Formatting instructions:
           stream: false,
           max_tokens: settings.maxOutputTokens || 65536,
           max_output_tokens: settings.maxOutputTokens || 65536,
+          antigravity_mode: settings.antigravityMode || 'desktop',
+          gemini_api_key: settings.geminiApiKey || undefined,
+          claude_mode: settings.claudeMode || 'desktop',
+          anthropic_api_key: settings.anthropicApiKey || undefined,
+          api_key: settings.anthropicApiKey || undefined,
+          openai_mode: settings.openaiMode || 'desktop',
+          openai_api_key: settings.openaiApiKey || undefined,
         }),
         signal: abortController.signal,
       });
@@ -2299,7 +2418,7 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               hasScreenshot: !!msg.includeScreenshot,
             });
-            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null);
+            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort);
             break;
           }
 
@@ -2312,6 +2431,7 @@ chrome.runtime.onConnect.addListener((port) => {
                 error: 'No active web tab detected for Cowork. Please open a web page (e.g. google.com) and try again.',
               });
             }
+
             const textToSave = msg.displayGoal || cleanPromptForHistory(msg.goalText);
             await appendMessageToSession(msg.sessionId, {
               role: 'user',
@@ -2319,7 +2439,7 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               mode: 'cowork',
             });
-            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id);
+            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort);
             break;
           }
 
@@ -2470,9 +2590,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse?.({
       isRunning: !!isActive,
       active: !!isActive,
-      title: runningTask?.overlayTitle || 'Antigravity is working',
+      title: runningTask?.overlayTitle || 'Autono is working',
       status: runningTask?.status,
     });
+    return true;
+  }
+
+  if (message?.type === 'update_extension_icon') {
+    updateExtensionIcon(message.model);
+    sendResponse?.({ success: true });
     return true;
   }
 

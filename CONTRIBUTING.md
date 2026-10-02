@@ -1,25 +1,41 @@
-# Contributing to Antigravity Agent
+# Contributing to Autono
 
-First off, thank you for considering contributing to Antigravity Agent! It's people like you that make open source such a great community.
+First off, thank you for taking the time to contribute to Autono! Open-source contributions from developers like you help make AI-assisted browsing better for everyone.
 
-## 1. Where do I go from here?
+## Code of Conduct
 
-If you've noticed a bug or have a feature request, make sure to check our [Issues](../../issues) first. If it's not there, feel free to open a new issue using the provided templates.
+By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md). Please report unacceptable behavior following the guidelines in that document.
 
-## 2. Fork & create a branch
+## How Can I Contribute?
 
-If this is something you think you can fix, then fork Antigravity Agent and create a branch with a descriptive name.
+### Reporting Bugs
 
-## 3. Implement your fix or feature
+Before creating bug reports, please check the [Issue Tracker](../../issues) to see if the problem has already been reported:
+- Use our [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md).
+- Provide a clear, descriptive title and steps to reproduce.
+- Include your operating system, Chrome version, model selected, and any relevant console errors.
 
-At this point, you're ready to make your changes! Feel free to ask for help if you need it. Make sure to keep your code clean and well-documented.
+### Suggesting Enhancements
 
-## 4. Make a Pull Request
+Feature requests are always welcome!
+- Use our [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md).
+- Explain why this enhancement would be useful and outline potential workflows or UI ideas.
 
-Once you're done, open a Pull Request. Provide a clear description of the changes you've made and link to any relevant issues.
+### Pull Requests
 
-## 5. Keeping your Pull Request updated
+1. **Fork the repository** and clone your fork locally.
+2. **Create a branch** off `main` with a descriptive name (e.g. `feat/mcp-tool-support` or `fix/overlay-positioning`).
+3. **Make your changes**:
+   - Keep changes modular, clean, and well-documented.
+   - Test your changes manually by loading the unpacked extension in Chrome.
+   - Verify that dynamic icon switching, Chat mode, and Cowork mode work as expected.
+4. **Push your branch** to your fork and submit a Pull Request targeting `main`.
+5. Fill out the [Pull Request Template](.github/pull_request_template.md).
 
-If a maintainer asks you to rebase your PR, they'll usually provide instructions. Otherwise, just keep it up to date with the `main` branch.
+## Development Guidelines
 
-Thank you!
+- **Vanilla JS**: Runtime code in `Autono` uses modern, standards-compliant vanilla JavaScript and Chrome Manifest V3 APIs. Avoid adding heavy client-side runtime build dependencies unless strictly necessary.
+- **Privacy & Safety**: Never commit API keys, personal file paths, tokens, or hardcoded personal credentials.
+- **Styling**: Maintain the ambient dark theme design tokens and responsive side panel layout.
+
+Thank you for helping make Autono great!

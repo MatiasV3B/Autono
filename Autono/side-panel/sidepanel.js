@@ -72,6 +72,15 @@ marked.setOptions({
   const settingMaxOutputTokens = document.getElementById('settingMaxOutputTokens');
   const settingTinyFishKey = document.getElementById('settingTinyFishKey');
   const settingDisplayMode = document.getElementById('settingDisplayMode');
+  const settingAntigravityMode = document.getElementById('settingAntigravityMode');
+  const settingGeminiApiKey = document.getElementById('settingGeminiApiKey');
+  const toggleGeminiKeyVisibility = document.getElementById('toggleGeminiKeyVisibility');
+  const settingClaudeMode = document.getElementById('settingClaudeMode');
+  const settingAnthropicApiKey = document.getElementById('settingAnthropicApiKey');
+  const toggleAnthropicKeyVisibility = document.getElementById('toggleAnthropicKeyVisibility');
+  const settingOpenaiMode = document.getElementById('settingOpenaiMode');
+  const settingOpenaiApiKey = document.getElementById('settingOpenaiApiKey');
+  const toggleOpenaiKeyVisibility = document.getElementById('toggleOpenaiKeyVisibility');
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 
   // AI Context Meter DOM References
@@ -116,6 +125,28 @@ marked.setOptions({
   let currentGridOpacity = 0.065;
   let currentSquareSize = 44;
   let currentTrailDecay = 0.022;
+  let currentAntigravityMode = 'desktop';
+  let currentGeminiApiKey = '';
+  let currentClaudeMode = 'desktop';
+  let currentAnthropicApiKey = '';
+  let currentOpenaiMode = 'desktop';
+  let currentOpenaiApiKey = '';
+  try {
+    const savedAntigravityMode = localStorage.getItem('antigravity_antigravity_mode');
+    if (savedAntigravityMode) currentAntigravityMode = savedAntigravityMode;
+    const savedGeminiKey = localStorage.getItem('antigravity_gemini_api_key');
+    if (savedGeminiKey) currentGeminiApiKey = savedGeminiKey;
+
+    const savedClaudeMode = localStorage.getItem('antigravity_claude_mode');
+    if (savedClaudeMode) currentClaudeMode = savedClaudeMode;
+    const savedAnthropicKey = localStorage.getItem('antigravity_anthropic_api_key');
+    if (savedAnthropicKey) currentAnthropicApiKey = savedAnthropicKey;
+
+    const savedOpenaiMode = localStorage.getItem('antigravity_openai_mode');
+    if (savedOpenaiMode) currentOpenaiMode = savedOpenaiMode;
+    const savedOpenaiKey = localStorage.getItem('antigravity_openai_api_key');
+    if (savedOpenaiKey) currentOpenaiApiKey = savedOpenaiKey;
+  } catch (_) {}
   let customSkills = [];
   try {
     const savedSkills = localStorage.getItem('antigravity_custom_skills');
@@ -160,7 +191,7 @@ marked.setOptions({
           name: 'Gemini 3.8 Flash',
           desc: 'Agile navigation, multimodal vision and rapid web page analysis.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 9, speed: 10, context: 10, efficiency: 9 },
+          metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 5 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'medium', 'high'],
           defaultThinking: 'medium',
@@ -171,7 +202,7 @@ marked.setOptions({
           name: 'Gemini 3.7 Flash',
           desc: 'Hybrid speed with adaptable deep deduction and agile response.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 9, speed: 9, context: 10, efficiency: 9 },
+          metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 5 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'medium', 'high'],
           defaultThinking: 'medium',
@@ -182,7 +213,7 @@ marked.setOptions({
           name: 'Gemini 3.6 Flash',
           desc: 'Efficient model for direct data extraction and lightweight background tasks.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 8, speed: 10, context: 10, efficiency: 8 },
+          metrics: { intelligence: 7, speed: 8, context: 10, efficiency: 6 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'medium', 'high'],
           defaultThinking: 'medium',
@@ -193,10 +224,21 @@ marked.setOptions({
           name: 'Gemini 3.1 Pro',
           desc: 'Peak analytical depth, massive 2.0M token window and complex codebase reasoning.',
           contextWindow: '2.0M tokens',
-          metrics: { intelligence: 10, speed: 6, context: 10, efficiency: 10 },
+          metrics: { intelligence: 9, speed: 3, context: 10, efficiency: 8 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'high'],
           defaultThinking: 'high',
+          usageGroup: 'gemini',
+        },
+        {
+          id: 'gpt-oss-120b-medium',
+          name: 'GPT-OSS 120B',
+          desc: 'Open source inference (MoE), unrestricted throughput, local edge deployment and total privacy.',
+          contextWindow: '128K tokens',
+          metrics: { intelligence: 6, speed: 2, context: 5, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
           usageGroup: 'gemini',
         },
       ],
@@ -204,18 +246,60 @@ marked.setOptions({
     claude: {
       id: 'claude',
       name: 'Claude',
-      iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="#D97757">
-        <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
-      </svg>`,
+      iconSvg: `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Claude">`,
       models: [
+        {
+          id: 'claude-sonnet-5-5',
+          name: 'Claude Sonnet 5.5',
+          desc: 'Next-generation flagship for agentic workflows, autonomous reasoning and state-of-the-art coding.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'claude-opus-5-5',
+          name: 'Claude Opus 5.5',
+          desc: 'Frontier supreme intelligence for ultra-complex multi-turn reasoning, safety and deep architecture.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 9, speed: 3, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'claude-fable-5-1',
+          name: 'Claude Fable 5.1',
+          desc: 'Specialized for agentic storytelling, sequence-of-thought workflows and dynamic web tasks.',
+          contextWindow: '500K tokens',
+          metrics: { intelligence: 7, speed: 7, context: 8, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'claude-haiku-4-5',
+          name: 'Claude Haiku 4.5',
+          desc: 'High-velocity instant response for real-time web actions, DOM extraction and responsive chats.',
+          contextWindow: '500K tokens',
+          metrics: { intelligence: 6, speed: 9, context: 8, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['fast', 'thinking'],
+          defaultThinking: 'fast',
+          usageGroup: 'claude_gpt',
+        },
         {
           id: 'claude-sonnet-4-6',
           name: 'Claude Sonnet 4.6',
           desc: 'Leader in SWE-bench, clean code architecture and structured system design.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 10, speed: 7, context: 9, efficiency: 9 },
-          caps: ['reasoning'],
-          thinking: ['low', 'high'],
+          metrics: { intelligence: 8, speed: 7, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
           defaultThinking: 'high',
           usageGroup: 'claude_gpt',
         },
@@ -224,9 +308,9 @@ marked.setOptions({
           name: 'Claude Opus 4.6',
           desc: 'Advanced mathematical challenges, security audit and critical reasoning.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 10, speed: 4, context: 9, efficiency: 8 },
-          caps: ['reasoning'],
-          thinking: ['low', 'high'],
+          metrics: { intelligence: 9, speed: 3, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
           defaultThinking: 'high',
           usageGroup: 'claude_gpt',
         },
@@ -234,19 +318,85 @@ marked.setOptions({
     },
     chatgpt: {
       id: 'chatgpt',
-      name: 'GPT / OSS',
-      iconSvg: `<svg viewBox="0 0 256 260" width="16" height="16" fill="#FFFFFF">
-        <path d="M239.184 106.203a64.716 64.716 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.716 64.716 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.665 64.665 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.767 64.767 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483Zm-97.56 136.338a48.397 48.397 0 0 1-31.105-11.255l1.535-.87 51.67-29.825a8.595 8.595 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601Zm-104.466-44.61a48.345 48.345 0 0 1-5.781-32.589l1.534.921 51.722 29.826a8.339 8.339 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803ZM23.549 85.38a48.499 48.499 0 0 1 25.58-21.333v61.39a8.288 8.288 0 0 0 4.195 7.316l62.874 36.272-21.845 12.636a.819.819 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405v.256Zm179.466 41.695-63.08-36.63L161.73 77.86a.819.819 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.544 8.544 0 0 0-4.4-7.213Zm21.742-32.69-1.535-.922-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.716.716 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391v.205ZM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87-51.67 29.825a8.595 8.595 0 0 0-4.246 7.367l-.051 72.697Zm11.868-25.58 28.138-16.217 28.188 16.218v32.434l-28.086 16.218-28.188-16.218-.052-32.434Z" />
+      name: 'OpenAI',
+      iconSvg: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1683a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4947zm-9.66-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1402-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.02 1.1683a.0757.0757 0 0 1-.071 0l-4.8303-2.7866A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1636a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
       </svg>`,
       models: [
         {
+          id: 'gpt-6-astra',
+          name: 'GPT-6 Astra',
+          desc: 'Frontier cosmic reasoning, multimodal perception and state-of-the-art autonomous execution.',
+          contextWindow: '2.0M tokens',
+          metrics: { intelligence: 9, speed: 6, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-6-sol',
+          name: 'GPT-6 Sol',
+          desc: 'Solar-speed frontier inference, low-latency reasoning and reactive browser copilot.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-6-luna',
+          name: 'GPT-6 Luna',
+          desc: 'Deep contemplative logic, rigorous mathematical proof and complex architecture.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 9, speed: 3, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-5-6-terra',
+          name: 'GPT-5.6 Terra',
+          desc: 'Grounded web navigation, tool orchestration and robust real-world automation.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 7, speed: 7, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-5-6-sol',
+          name: 'GPT-5.6 Sol',
+          desc: 'Solar-speed agile inference, low-latency reasoning and reactive web workflow execution.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 7, speed: 8, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-5-6-luna',
+          name: 'GPT-5.6 Luna',
+          desc: 'Deep contemplative deduction, structured mathematical proof and systematic logic.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 3, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
           id: 'gpt-oss-120b-medium',
           name: 'GPT-OSS 120B',
-          desc: 'Open source inference (MoE), unrestricted reasoning and complete privacy.',
+          desc: 'Open source inference (MoE), unrestricted throughput, local edge deployment and total privacy.',
           contextWindow: '128K tokens',
-          metrics: { intelligence: 8, speed: 8, context: 7, efficiency: 9 },
-          caps: ['reasoning'],
-          thinking: ['low', 'medium'],
+          metrics: { intelligence: 6, speed: 2, context: 5, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
           defaultThinking: 'medium',
           usageGroup: 'claude_gpt',
         },
@@ -255,6 +405,7 @@ marked.setOptions({
   };
 
   let activeProvider = 'gemini';
+  let activeModelTab = 'antigravity'; // 'antigravity', 'claude', or 'openai'
 
   function generateId() {
     return 'chat-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
@@ -876,11 +1027,41 @@ marked.setOptions({
       if (effort === 'low') return 'gemini-3.1-pro-low';
       return 'gemini-3.1-pro-high';
     }
+    if (baseModelId === 'claude-sonnet-5-5') {
+      return 'claude-sonnet-5-5';
+    }
+    if (baseModelId === 'claude-opus-5-5') {
+      return 'claude-opus-5-5';
+    }
+    if (baseModelId === 'claude-fable-5-1') {
+      return 'claude-fable-5-1';
+    }
+    if (baseModelId === 'claude-haiku-4-5') {
+      return 'claude-haiku-4-5';
+    }
     if (baseModelId === 'claude-sonnet-4-6') {
       return 'claude-sonnet-4-6';
     }
     if (baseModelId === 'claude-opus-4-6-thinking') {
       return 'claude-opus-4-6-thinking';
+    }
+    if (baseModelId === 'gpt-6-astra') {
+      return 'gpt-6-astra';
+    }
+    if (baseModelId === 'gpt-6-sol') {
+      return 'gpt-6-sol';
+    }
+    if (baseModelId === 'gpt-6-luna') {
+      return 'gpt-6-luna';
+    }
+    if (baseModelId === 'gpt-5-6-terra') {
+      return 'gpt-5-6-terra';
+    }
+    if (baseModelId === 'gpt-5-6-sol' || baseModelId === 'gpt-6') {
+      return 'gpt-5-6-sol';
+    }
+    if (baseModelId === 'gpt-5-6-luna' || baseModelId === 'gpt-5-6') {
+      return 'gpt-5-6-luna';
     }
     if (baseModelId === 'gpt-oss-120b-medium') {
       return 'gpt-oss-120b-medium';
@@ -962,24 +1143,84 @@ marked.setOptions({
       return { model: m, provider: p, effort };
     }
 
-    // Check Claude Sonnet
+    // Check Claude Sonnet (5.5 / 4.6)
     if (clean.includes('sonnet')) {
       const p = PROVIDER_DATA.claude;
-      const m = p.models.find((x) => x.id === 'claude-sonnet-4-6');
-      return { model: m, provider: p, effort: 'high' };
+      const m = (clean.includes('4.6') || clean.includes('4-6'))
+        ? p.models.find((x) => x.id === 'claude-sonnet-4-6')
+        : p.models.find((x) => x.id === 'claude-sonnet-5-5') || p.models[0];
+      return { model: m, provider: p, effort: m.defaultThinking || 'high' };
     }
 
-    // Check Claude Opus
+    // Check Claude Opus (5.5 / 4.6)
     if (clean.includes('opus')) {
       const p = PROVIDER_DATA.claude;
-      const m = p.models.find((x) => x.id === 'claude-opus-4-6-thinking');
-      return { model: m, provider: p, effort: 'high' };
+      const m = (clean.includes('4.6') || clean.includes('4-6'))
+        ? p.models.find((x) => x.id === 'claude-opus-4-6-thinking')
+        : p.models.find((x) => x.id === 'claude-opus-5-5') || p.models[1];
+      return { model: m, provider: p, effort: m.defaultThinking || 'high' };
+    }
+
+    // Check Claude Fable 5.1
+    if (clean.includes('fable')) {
+      const p = PROVIDER_DATA.claude;
+      const m = p.models.find((x) => x.id === 'claude-fable-5-1') || p.models[2];
+      return { model: m, provider: p, effort: m.defaultThinking || 'medium' };
+    }
+
+    // Check Claude Haiku 4.5
+    if (clean.includes('haiku')) {
+      const p = PROVIDER_DATA.claude;
+      const m = p.models.find((x) => x.id === 'claude-haiku-4-5') || p.models[3];
+      return { model: m, provider: p, effort: m.defaultThinking || 'fast' };
+    }
+
+    // Check GPT-6 Astra
+    if (clean.includes('astra')) {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-6-astra') || p.models[0];
+      return { model: m, provider: p, effort: m.defaultThinking || 'high' };
+    }
+
+    // Check GPT-6 Sol
+    if ((clean.includes('gpt-6') || clean.includes('6')) && clean.includes('sol')) {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-6-sol') || p.models[1];
+      return { model: m, provider: p, effort: m.defaultThinking || 'medium' };
+    }
+
+    // Check GPT-6 Luna
+    if ((clean.includes('gpt-6') || clean.includes('6')) && clean.includes('luna')) {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-6-luna') || p.models[2];
+      return { model: m, provider: p, effort: m.defaultThinking || 'high' };
+    }
+
+    // Check GPT-5.6 Terra
+    if (clean.includes('terra')) {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-5-6-terra') || p.models[3];
+      return { model: m, provider: p, effort: m.defaultThinking || 'medium' };
+    }
+
+    // Check GPT-5.6 Sol (or legacy gpt-6 alias)
+    if (clean.includes('sol') || clean === 'gpt-6') {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-5-6-sol') || p.models[4];
+      return { model: m, provider: p, effort: m.defaultThinking || 'medium' };
+    }
+
+    // Check GPT-5.6 Luna (or legacy gpt-5-6 alias)
+    if (clean.includes('luna') || clean === 'gpt-5-6' || clean.includes('5.6') || clean.includes('5-6') || clean.includes('gpt-5')) {
+      const p = PROVIDER_DATA.chatgpt;
+      const m = p.models.find((x) => x.id === 'gpt-5-6-luna') || p.models[5];
+      return { model: m, provider: p, effort: m.defaultThinking || 'high' };
     }
 
     // Check GPT-OSS / GPT-SS
     if (clean.includes('oss') || clean.includes('120b') || clean.includes('gpt-ss') || clean.includes('chatgpt')) {
       const p = PROVIDER_DATA.chatgpt;
-      const m = p.models.find((x) => x.id === 'gpt-oss-120b-medium');
+      const m = p.models.find((x) => x.id === 'gpt-oss-120b-medium') || p.models[6];
       let effort = clean.includes('low') ? 'low' : 'medium';
       return { model: m, provider: p, effort };
     }
@@ -1001,7 +1242,11 @@ marked.setOptions({
       if (currentModelObj.isExternal) {
         selectedModelLabel.textContent = currentModelObj.name;
       } else {
-        const effortTitle = effort.charAt(0).toUpperCase() + effort.slice(1);
+        const effortTitle = effort === 'fast'
+          ? 'Fast'
+          : (effort === 'x-high'
+            ? 'X-High'
+            : (effort === 'thinking' ? 'Thinking' : (effort === 'max' ? 'Max' : effort.charAt(0).toUpperCase() + effort.slice(1))));
         selectedModelLabel.textContent = `${currentModelObj.name} (${effortTitle})`;
       }
     }
@@ -1013,7 +1258,63 @@ marked.setOptions({
     });
   }
 
-  // ─── Model Picker Popover Logic (Hierarchical Rail: Gemini, Claude, GPT / OSS)
+  function isClaudeModel(modelId) {
+    if (!modelId) return false;
+    const s = String(modelId).toLowerCase();
+    return s.includes('claude') || s.includes('fable') || s.includes('haiku') || s.includes('sonnet') || s.includes('opus');
+  }
+
+  function isOpenAIModel(modelId) {
+    if (!modelId) return false;
+    const s = String(modelId).toLowerCase();
+    return s.includes('gpt') || s.includes('codex') || s.includes('o3') || s.includes('oss');
+  }
+
+  function updateDynamicBranding(modelId) {
+    const isClaude = isClaudeModel(modelId);
+    const isAntigravity = (modelId === 'gpt-oss-120b-medium' && activeModelTab === 'antigravity') || (!isClaude && !isOpenAIModel(modelId));
+    const isOpenAI = !isClaude && !isAntigravity && isOpenAIModel(modelId);
+
+    // 1. Welcome hero avatar & title
+    const welcomeAvatarImg = document.getElementById('welcomeAvatarImg');
+    const welcomeHeading = document.getElementById('welcomeHeading');
+    if (welcomeAvatarImg) {
+      if (isClaude) {
+        welcomeAvatarImg.src = '../assets/claude-logo.png';
+        welcomeAvatarImg.alt = 'Claude';
+      } else if (isOpenAI) {
+        welcomeAvatarImg.src = '../assets/icon-128.png';
+        welcomeAvatarImg.alt = 'OpenAI';
+      } else {
+        welcomeAvatarImg.src = '../assets/antigravity-logo.png';
+        welcomeAvatarImg.alt = 'Antigravity';
+      }
+    }
+    if (welcomeHeading) {
+      welcomeHeading.textContent = isClaude 
+        ? 'How can Claude help you today?' 
+        : (isOpenAI ? 'How can OpenAI help you today?' : 'How can Antigravity help you today?');
+    }
+
+    // 2. Input placeholder (when not in Cowork mode)
+    if (!isCoworkActive && promptInput) {
+      promptInput.placeholder = isClaude 
+        ? 'Send a message to Claude...' 
+        : (isOpenAI ? 'Send a message to OpenAI...' : 'Send a message to Antigravity...');
+    }
+
+    // 3. Extension Action Icon in Chrome toolbar
+    try {
+      if (chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({
+          type: 'update_extension_icon',
+          model: modelId
+        }).catch(() => null);
+      }
+    } catch (_) {}
+  }
+
+  // ─── Model Picker Popover Logic (Hierarchical Rail: Gemini, Claude, OpenAI) ───
   function selectModel(modelId, preserveEffort = false) {
     const match = findModelByAnyId(modelId);
     if (!match) return;
@@ -1030,7 +1331,22 @@ marked.setOptions({
 
     currentModel = resolveAntigravityModelId(currentBaseModelId, currentThinkingEffort);
 
-    // Update rail active state
+    // Update category tab & rail active state
+    if (isClaudeModel(model.id)) {
+      activeModelTab = 'claude';
+    } else if (model.id === 'gpt-oss-120b-medium') {
+      if (model.usageGroup === 'gemini' || activeModelTab === 'antigravity') {
+        activeModelTab = 'antigravity';
+      } else {
+        activeModelTab = 'openai';
+      }
+    } else if (isOpenAIModel(model.id)) {
+      activeModelTab = 'openai';
+    } else {
+      activeModelTab = 'antigravity';
+    }
+    updatePickerTabsUI();
+
     document.querySelectorAll('.picker-rail .rail-btn').forEach((b) => {
       b.classList.toggle('active', b.getAttribute('data-provider') === activeProvider);
     });
@@ -1038,7 +1354,13 @@ marked.setOptions({
     // Update provider label in picker
     const provLabel = document.getElementById('pickerProviderLabel');
     if (provLabel) {
-      provLabel.textContent = provider.name;
+      if (activeModelTab === 'claude') {
+        provLabel.textContent = 'Claude (Anthropic)';
+      } else if (activeModelTab === 'openai') {
+        provLabel.textContent = 'OpenAI (GPT-6 & GPT-5.6)';
+      } else {
+        provLabel.textContent = 'Antigravity (Google Gemini)';
+      }
     }
 
     // Update trigger icon with matching provider SVG / Image
@@ -1052,10 +1374,17 @@ marked.setOptions({
       if (model.isExternal) {
         selectedModelLabel.textContent = model.name;
       } else {
-        const effortTitle = currentThinkingEffort.charAt(0).toUpperCase() + currentThinkingEffort.slice(1);
+        const effortTitle = currentThinkingEffort === 'fast'
+          ? 'Fast'
+          : (currentThinkingEffort === 'x-high'
+            ? 'X-High'
+            : (currentThinkingEffort === 'thinking' ? 'Thinking' : (currentThinkingEffort === 'max' ? 'Max' : currentThinkingEffort.charAt(0).toUpperCase() + currentThinkingEffort.slice(1))));
         selectedModelLabel.textContent = `${model.name} (${effortTitle})`;
       }
     }
+
+    // Update dynamic branding (Welcome hero avatar, heading, placeholder, extension icon)
+    updateDynamicBranding(model.id);
 
     // Re-render rows to update selection highlight and specs
     renderModelPickerRows(modelSearchInput.value);
@@ -1092,9 +1421,13 @@ marked.setOptions({
   };
 
   const REASONING_INTELLIGENCE_DELTA = {
-    low: -2,
+    fast: 0,
+    low: -1,
     medium: 0,
-    high: 2,
+    thinking: 1,
+    high: 1,
+    'x-high': 2,
+    max: 2,
   };
 
   function getMetricColor(value, invert = false) {
@@ -1167,19 +1500,93 @@ marked.setOptions({
     const activeEffort = thinkingList.includes(effort) ? effort : (model.defaultThinking || thinkingList[0]);
 
     const delta = REASONING_INTELLIGENCE_DELTA[activeEffort] || 0;
-    const baseIntel = model.metrics?.intelligence || 8;
-    const adjustedIntel = clampMetric(baseIntel + delta);
-    const speed = model.metrics?.speed || 8;
-    const context = model.metrics?.context || 8;
-    const efficiency = model.metrics?.efficiency ?? 9;
+    const baseIntel = model.metrics?.intelligence || 7;
+    // Grounded & balanced ratings: scalable up to 10
+    const adjustedIntel = Math.min(10, Math.max(1, Math.round(baseIntel + delta)));
+    const speed = Math.min(10, Math.max(1, Math.round(model.metrics?.speed || 6)));
+    const context = model.metrics?.context || 6;
+    const efficiency = Math.min(10, Math.max(1, Math.round(model.metrics?.efficiency ?? 6)));
     const contextWin = model.contextWindow || '1.0M tokens';
-    const providerName = model.usageGroup === 'claude_gpt' && model.id.includes('claude') ? 'Anthropic' : (model.id.includes('gpt') || model.id.includes('oss')) ? 'OpenAI' : 'Gemini';
+    const isClaudeFamily = isClaudeModel(model.id);
+    const isOpenAIFamily = !isClaudeFamily && (model.id === 'gpt-oss-120b-medium' ? (model.usageGroup !== 'gemini' && activeModelTab !== 'antigravity') : isOpenAIModel(model.id));
+    const providerName = isClaudeFamily ? 'Anthropic' : (isOpenAIFamily ? 'OpenAI' : 'Antigravity');
+
+    const formatEffortLabel = (lvl) => {
+      if (lvl === 'fast') return 'Fast';
+      if (lvl === 'x-high') return 'X-High';
+      if (lvl === 'thinking') return 'Thinking';
+      if (lvl === 'max') return 'Max';
+      return lvl.charAt(0).toUpperCase() + lvl.slice(1);
+    };
 
     const radioButtonsHtml = thinkingList.map((lvl) => `
       <button type="button" class="seg-radio-btn ${lvl === activeEffort ? 'active' : ''}" data-effort="${lvl}">
-        ${lvl.charAt(0).toUpperCase() + lvl.slice(1)}
+        ${formatEffortLabel(lvl)}
       </button>
     `).join('');
+
+    let engineModeHtml = '';
+    if (isClaudeFamily) {
+      engineModeHtml = `
+        <div class="preview-config-section" style="margin-top:8px;">
+          <div class="preview-config-label">EXECUTION ENGINE</div>
+          <div class="preview-config-sub">Claude Mode</div>
+          <div class="segmented-radio-group" id="previewClaudeModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentClaudeMode !== 'api' ? 'active' : ''}" data-provider="claude" data-mode="desktop" title="Use local terminal with Claude Terminal (no API key required)">
+              💻 Local Terminal
+            </button>
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentClaudeMode === 'api' ? 'active' : ''}" data-provider="claude" data-mode="api" title="Use official Anthropic API directly with your Anthropic API Key">
+              ⚡ Claude API
+            </button>
+          </div>
+          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="claudeModePreviewNote">
+            ${currentClaudeMode === 'api'
+              ? (currentAnthropicApiKey ? '🟢 Claude API mode active (Anthropic Key configured).' : '⚠️ Claude API selected without Anthropic API Key. Configure in Settings.')
+              : '🟢 Local Terminal mode active (runs locally via CLI/terminal).'}
+          </div>
+        </div>
+      `;
+    } else if (isOpenAIFamily) {
+      engineModeHtml = `
+        <div class="preview-config-section" style="margin-top:8px;">
+          <div class="preview-config-label">EXECUTION ENGINE</div>
+          <div class="preview-config-sub">OpenAI Mode</div>
+          <div class="segmented-radio-group" id="previewOpenaiModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentOpenaiMode !== 'api' ? 'active' : ''}" data-provider="openai" data-mode="desktop" title="Use local terminal execution">
+              💻 Local Terminal
+            </button>
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentOpenaiMode === 'api' ? 'active' : ''}" data-provider="openai" data-mode="api" title="Use official OpenAI API directly with your OpenAI API Key">
+              ⚡ ChatGPT API
+            </button>
+          </div>
+          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="openaiModePreviewNote">
+            ${currentOpenaiMode === 'api'
+              ? (currentOpenaiApiKey ? '🟢 ChatGPT API mode active (OpenAI Key configured).' : '⚠️ ChatGPT API selected without OpenAI API Key. Configure in Settings.')
+              : '🟢 Local Terminal mode active (runs locally via Codex CLI).'}
+          </div>
+        </div>
+      `;
+    } else {
+      engineModeHtml = `
+        <div class="preview-config-section" style="margin-top:8px;">
+          <div class="preview-config-label">EXECUTION ENGINE</div>
+          <div class="preview-config-sub">Antigravity Mode</div>
+          <div class="segmented-radio-group" id="previewAntigravityModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentAntigravityMode !== 'api' ? 'active' : ''}" data-provider="antigravity" data-mode="desktop" title="Use local terminal via local bridge">
+              💻 Local Terminal
+            </button>
+            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentAntigravityMode === 'api' ? 'active' : ''}" data-provider="antigravity" data-mode="api" title="Use Google Gemini API directly with your Gemini API Key">
+              ⚡ Gemini API
+            </button>
+          </div>
+          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="antigravityModePreviewNote">
+            ${currentAntigravityMode === 'api'
+              ? (currentGeminiApiKey ? '🟢 Gemini API mode active (Gemini Key configured).' : '⚠️ Gemini API selected without Google Gemini API Key. Configure in Settings.')
+              : '🟢 Local Terminal mode active (runs locally via Bridge).'}
+          </div>
+        </div>
+      `;
+    }
 
     previewCard.innerHTML = `
       <div class="preview-panel-content">
@@ -1201,10 +1608,11 @@ marked.setOptions({
         <div class="preview-config-section">
           <div class="preview-config-label">CONFIGURATION</div>
           <div class="preview-config-sub">Reasoning</div>
-          <div class="segmented-radio-group">
+          <div class="segmented-radio-group" style="display:grid;grid-template-columns:repeat(${thinkingList.length}, minmax(0, 1fr));width:100%;gap:4px;">
             ${radioButtonsHtml}
           </div>
         </div>
+        ${engineModeHtml}
       </div>
     `;
 
@@ -1216,17 +1624,102 @@ marked.setOptions({
     });
 
     // Wire up segmented radio buttons in the preview card
-    previewCard.querySelectorAll('.seg-radio-btn').forEach((btn) => {
+    previewCard.querySelectorAll('.seg-radio-btn[data-effort]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const nextEffort = btn.getAttribute('data-effort');
         if (model.id !== currentBaseModelId) {
           currentBaseModelId = model.id;
-          activeProvider = model.usageGroup === 'gemini' ? 'gemini' : (model.id.includes('claude') ? 'claude' : 'chatgpt');
+          activeProvider = model.usageGroup === 'gemini' ? 'gemini' : (isClaudeFamily ? 'claude' : 'chatgpt');
         }
         updateThinkingEffort(nextEffort);
         renderModelPickerRows(modelSearchInput.value);
         renderModelPreviewPanel(model, nextEffort);
+      });
+    });
+
+    // Wire up Execution Engine buttons in preview card (Antigravity, Claude, OpenAI)
+    previewCard.querySelectorAll('.engine-mode-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const prov = btn.getAttribute('data-provider');
+        const targetMode = btn.getAttribute('data-mode');
+        const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+        let configPayload = {};
+
+        if (prov === 'claude') {
+          currentClaudeMode = targetMode;
+          if (settingClaudeMode) settingClaudeMode.value = targetMode;
+          try { localStorage.setItem('antigravity_claude_mode', targetMode); } catch (_) {}
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get(['antigravity_settings'], (res) => {
+              const prev = res.antigravity_settings || {};
+              prev.claudeMode = targetMode;
+              chrome.storage.local.set({ antigravity_settings: prev, antigravity_claude_mode: targetMode });
+            });
+          }
+          configPayload.claude_mode = targetMode;
+          if (targetMode === 'api') {
+            if (!currentAnthropicApiKey) {
+              showToast('⚠️ Claude API active. Configure Anthropic API Key in Settings');
+            } else {
+              showToast('⚡ Claude API active');
+            }
+          } else {
+            showToast('💻 Local Terminal active');
+          }
+        } else if (prov === 'openai') {
+          currentOpenaiMode = targetMode;
+          if (settingOpenaiMode) settingOpenaiMode.value = targetMode;
+          try { localStorage.setItem('antigravity_openai_mode', targetMode); } catch (_) {}
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get(['antigravity_settings'], (res) => {
+              const prev = res.antigravity_settings || {};
+              prev.openaiMode = targetMode;
+              chrome.storage.local.set({ antigravity_settings: prev, antigravity_openai_mode: targetMode });
+            });
+          }
+          configPayload.openai_mode = targetMode;
+          if (targetMode === 'api') {
+            if (!currentOpenaiApiKey) {
+              showToast('⚠️ ChatGPT API active. Configure OpenAI Key in Settings');
+            } else {
+              showToast('⚡ ChatGPT API active');
+            }
+          } else {
+            showToast('💻 Local Terminal active');
+          }
+        } else {
+          // Antigravity
+          currentAntigravityMode = targetMode;
+          if (settingAntigravityMode) settingAntigravityMode.value = targetMode;
+          try { localStorage.setItem('antigravity_antigravity_mode', targetMode); } catch (_) {}
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get(['antigravity_settings'], (res) => {
+              const prev = res.antigravity_settings || {};
+              prev.antigravityMode = targetMode;
+              chrome.storage.local.set({ antigravity_settings: prev, antigravity_antigravity_mode: targetMode });
+            });
+          }
+          configPayload.antigravity_mode = targetMode;
+          if (targetMode === 'api') {
+            if (!currentGeminiApiKey) {
+              showToast('⚠️ Gemini API active. Configure Gemini Key in Settings');
+            } else {
+              showToast('⚡ Gemini API active');
+            }
+          } else {
+            showToast('💻 Local Terminal active');
+          }
+        }
+
+        fetch(`${bridgeUrl}/api/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(configPayload)
+        }).catch(() => null);
+
+        renderModelPreviewPanel(model, effort);
       });
     });
   }
@@ -1251,8 +1744,22 @@ marked.setOptions({
         });
       }
     } else {
-      const p = PROVIDER_DATA[activeProvider] || PROVIDER_DATA.gemini;
-      modelsToRender = p.models;
+      if (activeModelTab === 'claude') {
+        // Claude tab: all Claude models
+        modelsToRender = PROVIDER_DATA.claude.models;
+      } else if (activeModelTab === 'openai') {
+        // OpenAI tab: all OpenAI models (Codex, GPT-4o, o3-mini, GPT-OSS)
+        modelsToRender = PROVIDER_DATA.chatgpt.models;
+      } else {
+        // Antigravity models tab: Gemini + older Claude models (Sonnet 4.6, Opus 4.6)
+        const olderClaudeModels = PROVIDER_DATA.claude.models.filter((m) =>
+          ['claude-sonnet-4-6', 'claude-opus-4-6-thinking'].includes(m.id)
+        );
+        modelsToRender = [
+          ...PROVIDER_DATA.gemini.models,
+          ...olderClaudeModels,
+        ];
+      }
     }
 
     if (modelsToRender.length === 0) {
@@ -1303,9 +1810,45 @@ marked.setOptions({
     }
   }
 
+  function updatePickerTabsUI() {
+    const tabsBar = document.getElementById('pickerTopTabs');
+    if (!tabsBar) return;
+    tabsBar.querySelectorAll('.picker-tab-btn').forEach((btn) => {
+      const tab = btn.getAttribute('data-tab');
+      if (tab === activeModelTab) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    const provLabel = document.getElementById('pickerProviderLabel');
+    if (provLabel) {
+      if (activeModelTab === 'claude') {
+        provLabel.textContent = 'Claude (Anthropic)';
+      } else if (activeModelTab === 'openai') {
+        provLabel.textContent = 'OpenAI (GPT-6 & GPT-5.6)';
+      } else {
+        provLabel.textContent = 'Antigravity (Google Gemini)';
+      }
+    }
+  }
+
   function openModelPicker() {
     modelPickerTrigger.classList.add('open');
     modelPickerPopover.classList.remove('hidden');
+    if (isClaudeModel(currentBaseModelId)) {
+      activeModelTab = 'claude';
+    } else if (currentBaseModelId === 'gpt-oss-120b-medium') {
+      if (activeModelTab !== 'openai') {
+        activeModelTab = 'antigravity';
+      }
+    } else if (isOpenAIModel(currentBaseModelId)) {
+      activeModelTab = 'openai';
+    } else {
+      activeModelTab = 'antigravity';
+    }
+    updatePickerTabsUI();
     modelSearchInput.value = '';
     modelSearchInput.focus();
     renderModelPickerRows();
@@ -1330,6 +1873,22 @@ marked.setOptions({
       closeModelPicker();
     }
   });
+
+  // Top Tabs: Antigravity vs Claude Code
+  const pickerTopTabs = document.getElementById('pickerTopTabs');
+  if (pickerTopTabs) {
+    pickerTopTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.picker-tab-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      const tab = btn.getAttribute('data-tab');
+      if (!tab || tab === activeModelTab) return;
+      activeModelTab = tab;
+      updatePickerTabsUI();
+      modelSearchInput.value = '';
+      renderModelPickerRows();
+    });
+  }
 
   // Left rail provider buttons: delegated to #pickerRail to handle dynamic external providers seamlessly
   const pickerRail = document.getElementById('pickerRail');
@@ -1887,6 +2446,7 @@ marked.setOptions({
         userText: finalPrompt,
         displayPrompt: displayPrompt,
         modelName: currentModel,
+        thinkingEffort: currentThinkingEffort,
         includeScreenshot: !!screenshotToSend,
       });
     } else {
@@ -1897,6 +2457,7 @@ marked.setOptions({
         goalText: finalPrompt,
         displayGoal: displayPrompt,
         modelName: currentModel,
+        thinkingEffort: currentThinkingEffort,
       });
     }
 
@@ -2116,11 +2677,12 @@ marked.setOptions({
       // Assistant
       const avatar = document.createElement('div');
       avatar.className = 'assistant-avatar';
-      avatar.innerHTML = `
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
-          <path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" fill="currentColor"/>
-        </svg>
-      `;
+      const isClaude = isClaudeModel(currentBaseModelId || currentModel);
+      if (isClaude) {
+        avatar.innerHTML = `<img src="../assets/claude-icon-32.png" width="18" height="18" alt="Claude">`;
+      } else {
+        avatar.innerHTML = `<img src="../assets/antigravity-icon-32.png" width="18" height="18" alt="Antigravity">`;
+      }
       row.appendChild(avatar);
 
       const content = document.createElement('div');
@@ -2952,7 +3514,7 @@ marked.setOptions({
         name: m.name || m.id,
         desc: m.desc || `Model provided by ${prov.name}`,
         contextWindow: m.contextWindow || '128K tokens',
-        caps: ['reasoning'],
+        caps: ['reasoning', 'image'],
         isExternal: true,
         providerId: prov.id,
         providerName: prov.name,
@@ -3252,6 +3814,30 @@ marked.setOptions({
     if (settingTinyFishKey) {
       settingTinyFishKey.value = s.tinyFishApiKey || '';
       tinyFishApiKey = s.tinyFishApiKey || '';
+    }
+    if (settingAntigravityMode && s.antigravityMode) {
+      settingAntigravityMode.value = s.antigravityMode;
+      currentAntigravityMode = s.antigravityMode;
+    }
+    if (settingGeminiApiKey && s.geminiApiKey !== undefined) {
+      settingGeminiApiKey.value = s.geminiApiKey;
+      currentGeminiApiKey = s.geminiApiKey;
+    }
+    if (settingClaudeMode && s.claudeMode) {
+      settingClaudeMode.value = s.claudeMode;
+      currentClaudeMode = s.claudeMode;
+    }
+    if (settingAnthropicApiKey && s.anthropicApiKey !== undefined) {
+      settingAnthropicApiKey.value = s.anthropicApiKey;
+      currentAnthropicApiKey = s.anthropicApiKey;
+    }
+    if (settingOpenaiMode && s.openaiMode) {
+      settingOpenaiMode.value = s.openaiMode;
+      currentOpenaiMode = s.openaiMode;
+    }
+    if (settingOpenaiApiKey && s.openaiApiKey !== undefined) {
+      settingOpenaiApiKey.value = s.openaiApiKey;
+      currentOpenaiApiKey = s.openaiApiKey;
     }
     if (settingDisplayMode) settingDisplayMode.value = s.displayMode || 'side_panel';
     if (s.selectedModel) selectModel(s.selectedModel);
@@ -3680,6 +4266,33 @@ marked.setOptions({
     });
   }
 
+  // Toggle Gemini API Key Visibility
+  if (toggleGeminiKeyVisibility && settingGeminiApiKey) {
+    toggleGeminiKeyVisibility.addEventListener('click', () => {
+      const isPwd = settingGeminiApiKey.type === 'password';
+      settingGeminiApiKey.type = isPwd ? 'text' : 'password';
+      toggleGeminiKeyVisibility.textContent = isPwd ? '🔒' : '👁';
+    });
+  }
+
+  // Toggle Anthropic API Key Visibility
+  if (toggleAnthropicKeyVisibility && settingAnthropicApiKey) {
+    toggleAnthropicKeyVisibility.addEventListener('click', () => {
+      const isPwd = settingAnthropicApiKey.type === 'password';
+      settingAnthropicApiKey.type = isPwd ? 'text' : 'password';
+      toggleAnthropicKeyVisibility.textContent = isPwd ? '🔒' : '👁';
+    });
+  }
+
+  // Toggle OpenAI API Key Visibility
+  if (toggleOpenaiKeyVisibility && settingOpenaiApiKey) {
+    toggleOpenaiKeyVisibility.addEventListener('click', () => {
+      const isPwd = settingOpenaiApiKey.type === 'password';
+      settingOpenaiApiKey.type = isPwd ? 'text' : 'password';
+      toggleOpenaiKeyVisibility.textContent = isPwd ? '🔒' : '👁';
+    });
+  }
+
   // Test Bridge Button
   const testBridgeBtn = document.getElementById('testBridgeBtn');
   const bridgeStatusBadge = document.getElementById('bridgeStatusBadge');
@@ -3733,12 +4346,42 @@ marked.setOptions({
       enrichedSysPrompt += `\nUsuario prefiere ser llamado: ${userNick}.`;
     }
 
+    const antigravityModeVal = settingAntigravityMode ? settingAntigravityMode.value : currentAntigravityMode;
+    const geminiApiKeyVal = settingGeminiApiKey ? settingGeminiApiKey.value.trim() : currentGeminiApiKey;
+    currentAntigravityMode = antigravityModeVal || 'desktop';
+    currentGeminiApiKey = geminiApiKeyVal || '';
+
+    const claudeModeVal = settingClaudeMode ? settingClaudeMode.value : currentClaudeMode;
+    const anthropicApiKeyVal = settingAnthropicApiKey ? settingAnthropicApiKey.value.trim() : currentAnthropicApiKey;
+    currentClaudeMode = claudeModeVal || 'desktop';
+    currentAnthropicApiKey = anthropicApiKeyVal || '';
+
+    const openaiModeVal = settingOpenaiMode ? settingOpenaiMode.value : currentOpenaiMode;
+    const openaiApiKeyVal = settingOpenaiApiKey ? settingOpenaiApiKey.value.trim() : currentOpenaiApiKey;
+    currentOpenaiMode = openaiModeVal || 'desktop';
+    currentOpenaiApiKey = openaiApiKeyVal || '';
+
+    try {
+      localStorage.setItem('antigravity_antigravity_mode', currentAntigravityMode);
+      localStorage.setItem('antigravity_gemini_api_key', currentGeminiApiKey);
+      localStorage.setItem('antigravity_claude_mode', currentClaudeMode);
+      localStorage.setItem('antigravity_anthropic_api_key', currentAnthropicApiKey);
+      localStorage.setItem('antigravity_openai_mode', currentOpenaiMode);
+      localStorage.setItem('antigravity_openai_api_key', currentOpenaiApiKey);
+    } catch (_) {}
+
     const newSettings = {
       bridgeUrl: settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8000',
       selectedModel: settingDefaultModel?.value || currentModel,
       maxSteps: parseInt(settingMaxSteps?.value, 10) || 30,
       tinyFishApiKey: settingTinyFishKey ? settingTinyFishKey.value.trim() : '',
       displayMode: settingDisplayMode ? settingDisplayMode.value : 'side_panel',
+      antigravityMode: currentAntigravityMode,
+      geminiApiKey: currentGeminiApiKey,
+      claudeMode: currentClaudeMode,
+      anthropicApiKey: currentAnthropicApiKey,
+      openaiMode: currentOpenaiMode,
+      openaiApiKey: currentOpenaiApiKey,
       agentLanguage: document.getElementById('settingAgentLanguage')?.value || 'en',
       defaultThinking: document.getElementById('settingDefaultThinking')?.value || 'medium',
       systemPrompt: enrichedSysPrompt,
@@ -3783,6 +4426,20 @@ marked.setOptions({
     } catch (_) {}
 
     sendPortMessage({ type: 'save_settings', settings: newSettings });
+
+    const bridgeUrl = (newSettings.bridgeUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+    fetch(`${bridgeUrl}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        antigravity_mode: currentAntigravityMode,
+        gemini_api_key: currentGeminiApiKey,
+        claude_mode: currentClaudeMode,
+        anthropic_api_key: currentAnthropicApiKey,
+        openai_mode: currentOpenaiMode,
+        openai_api_key: currentOpenaiApiKey,
+      }),
+    }).catch(() => null);
     applyKeepAwake(newSettings.shadowPreventSleep);
     selectModel(newSettings.selectedModel);
     renderModelPickerRows(modelSearchInput.value);

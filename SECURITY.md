@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Currently, only the latest release of the Antigravity Agent extension is supported with security updates. 
+Currently, only the latest release of the Autono extension is actively maintained with security updates. 
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -11,13 +11,15 @@ Currently, only the latest release of the Antigravity Agent extension is support
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within Antigravity Agent, please do not disclose it publicly. Instead, please report it via private messaging or email to the repository maintainers. 
+If you discover a security vulnerability within Autono, please do not disclose it publicly on GitHub Issues or discussions. Instead, follow these steps:
 
-We take all security reports seriously and will work to address any issues promptly.
+1. **Submit a Private Report**: Contact the repository maintainers via GitHub Private Vulnerability Reporting or reach out to the project leads.
+2. **Provide Details**:
+   - A clear description of the vulnerability and its potential attack vector.
+   - Exact steps or minimal reproduction script to demonstrate the issue.
+   - The affected component (e.g. background worker, content script overlay, local bridge integration).
+   - Your proposed remediation or patch, if available.
 
-When reporting a vulnerability, please include:
-- A description of the vulnerability.
-- Steps to reproduce the issue.
-- Potential impact.
+We take all security reports seriously and will work with you to address and verify any issues before public disclosure.
 
-Thank you for helping keep Antigravity Agent secure!
+Thank you for helping keep Autono secure!

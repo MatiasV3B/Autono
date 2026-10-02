@@ -29,13 +29,13 @@
 
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.setAttribute('aria-label', 'Ask Antigravity about selection');
+    chip.setAttribute('aria-label', 'Ask Autono about selection');
     chip.innerHTML = `
       <span style="display:inline-flex;align-items:center;gap:6px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
-        <span>✨ Antigravity</span>
+        <span>✨ Autono</span>
       </span>
     `;
 
@@ -229,10 +229,10 @@
       animation: 'antigravity-pulse 1.4s infinite ease-in-out',
     });
 
-    // Text label (Strictly "Antigravity is working" - no "Code:" prefix)
+    // Text label (Strictly "Autono is working" - no "Code:" prefix)
     const label = document.createElement('span');
     label.id = '__antigravity_overlay_label';
-    const cleanTitle = (options.title || 'Antigravity is working').replace(/^Code:\s*/i, '');
+    const cleanTitle = (options.title || 'Autono is working').replace(/^Code:\s*/i, '');
     label.textContent = cleanTitle;
     Object.assign(label.style, {
       color: '#f8fafc',
@@ -311,7 +311,7 @@
     const inlineInput = document.createElement('input');
     inlineInput.type = 'text';
     inlineInput.id = '__antigravity_inline_input';
-    inlineInput.placeholder = 'Instruction for Antigravity... (Press Enter to send)';
+    inlineInput.placeholder = 'Instruction for Autono... (Press Enter to send)';
     Object.assign(inlineInput.style, {
       background: 'rgba(0, 0, 0, 0.65)',
       border: '1px solid rgba(168, 85, 247, 0.5)',
@@ -351,7 +351,7 @@
       inlineInput.value = '';
       inlineInputBox.style.display = 'none';
       writeBtn.style.display = 'inline-block';
-      label.textContent = 'Instruction sent to Antigravity';
+      label.textContent = 'Instruction sent to Autono';
       setTimeout(() => {
         if (!isWorkPaused) label.textContent = cleanTitle;
       }, 2500);

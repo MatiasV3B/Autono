@@ -1,7 +1,7 @@
 {
-  "name": "antigravity-agent",
+  "name": "autono",
   "version": "1.0.0",
-  "description": "Antigravity Agent Chrome Extension with ChatGPT UI and shadcn components",
+  "description": "Autono - Autonomous AI Browser Agent & Navigation Copilot (Gemini 3.8, Claude)",
   "type": "module",
   "scripts": {
     "dev": "vite",
