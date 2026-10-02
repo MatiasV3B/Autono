@@ -49,7 +49,7 @@ flowchart TD
     end
 
     subgraph LocalMachine ["Local Host Machine"]
-        Bridge["Antigravity Bridge\n(FastAPI Server @ http://127.0.0.1:8000)"]
+        Bridge["Model Bridge\n(FastAPI Server @ http://127.0.0.1:8000)"]
     end
 
     subgraph Providers ["AI Providers & Dual Execution Engines"]
@@ -81,16 +81,16 @@ Follow these steps to set up your environment:
 
 ### 1. Prerequisites
 - **Google Chrome** version 120 or higher (or any Chromium browser with Manifest V3 Side Panel API support).
-- **Python 3.10+** (to run the local Antigravity Bridge server).
+- **Python 3.10+** (to run the local Model Bridge server).
 - **Git** installed on your system.
 
-### 2. Start the Local Antigravity Bridge Server
-Autono communicates with the local [**Antigravity Bridge**](https://github.com/MatiasV3B/AntigravityBridge) server running on `http://127.0.0.1:8000`.
+### 2. Start the Local Model Bridge Server
+Autono communicates with the local [**Model Bridge**](https://github.com/MatiasV3B/ModelBridge) server running on `http://127.0.0.1:8000`.
 
-1. Clone and navigate to the official [Antigravity Bridge](https://github.com/MatiasV3B/AntigravityBridge) repository:
+1. Clone and navigate to the official [Model Bridge](https://github.com/MatiasV3B/ModelBridge) repository:
    ```bash
-   git clone https://github.com/MatiasV3B/AntigravityBridge.git
-   cd AntigravityBridge
+   git clone https://github.com/MatiasV3B/ModelBridge.git
+   cd ModelBridge
    ```
 2. Install dependencies:
    ```bash
@@ -182,7 +182,7 @@ Then, follow the [How to Reload](#-how-to-reload) steps in Chrome.
 
 ### 2. Update the Local Bridge Backend
 ```bash
-cd AntigravityBridge
+cd ModelBridge
 git pull origin main
 pip install -r requirements.txt --upgrade
 ```
