@@ -412,27 +412,111 @@ marked.setOptions({
   }
 
   // ─── Connect to Service Worker ──────────────────────────────────────────────
+  let heartbeatTimer = null;
+  let reconnectTimeout = null;
+
+  function isContextValid() {
+    try {
+      return Boolean(chrome?.runtime?.id);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function showContextInvalidatedNotice() {
+    if (toastNoticeBox) {
+      toastNoticeBox.innerHTML = `<span>Autono was updated. <a href="#" id="reloadSidePanelLink" style="color:#60a5fa;text-decoration:underline;font-weight:600;">Click to reload panel</a></span>`;
+      toastNoticeBox.classList.remove('hidden');
+      document.getElementById('reloadSidePanelLink')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        location.reload();
+      });
+    }
+  }
+
   function setupPort() {
+    if (!isContextValid()) {
+      showContextInvalidatedNotice();
+      return;
+    }
+
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+
     try {
       port = chrome.runtime.connect({ name: 'antigravity-panel' });
 
       port.onMessage.addListener((msg) => {
+        if (msg && msg.type === 'pong') {
+          return;
+        }
         handleBackgroundMessage(msg);
       });
 
       port.onDisconnect.addListener(() => {
-        console.warn('Disconnected from service worker, reconnecting...');
+        const _err = chrome.runtime.lastError;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
         port = null;
-        setTimeout(setupPort, 1000);
+
+        if (!isContextValid()) {
+          showContextInvalidatedNotice();
+          return;
+        }
+
+        reconnectTimeout = setTimeout(() => {
+          reconnectTimeout = null;
+          if (isContextValid()) {
+            setupPort();
+          }
+        }, 1000);
       });
+
+      // Keep service worker alive while side panel is actively open (every 20s)
+      heartbeatTimer = setInterval(() => {
+        if (!isContextValid()) {
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+          return;
+        }
+        if (port) {
+          try {
+            port.postMessage({ type: 'heartbeat' });
+          } catch (_) {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+            port = null;
+            if (isContextValid()) {
+              setupPort();
+            }
+          }
+        }
+      }, 20000);
     } catch (e) {
-      console.error('Error connecting to background worker:', e);
+      const _ = chrome.runtime.lastError;
       port = null;
-      setTimeout(setupPort, 1500);
+      if (isContextValid()) {
+        reconnectTimeout = setTimeout(() => {
+          reconnectTimeout = null;
+          setupPort();
+        }, 1500);
+      }
     }
   }
 
   function sendPortMessage(payload) {
+    if (!isContextValid()) {
+      showContextInvalidatedNotice();
+      return false;
+    }
     try {
       if (!port) {
         setupPort();
@@ -442,7 +526,7 @@ marked.setOptions({
         return true;
       }
     } catch (err) {
-      console.warn('Failed to send port message, resetting port:', err);
+      const _ = chrome.runtime.lastError;
       port = null;
       try {
         setupPort();

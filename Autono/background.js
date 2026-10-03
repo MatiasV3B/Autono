@@ -2397,6 +2397,14 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener(async (msg) => {
       try {
         switch (msg.type) {
+          case 'heartbeat':
+          case 'ping': {
+            try {
+              port.postMessage({ type: 'pong', timestamp: Date.now() });
+            } catch (_) {}
+            break;
+          }
+
           case 'ping_bridge': {
             const ok = await checkBridgeHealth();
             port.postMessage({ type: 'bridge_status', online: ok, models: availableModels, quota: cachedCliQuota });
@@ -2529,6 +2537,7 @@ chrome.runtime.onConnect.addListener((port) => {
     });
 
     port.onDisconnect.addListener(() => {
+      const _err = chrome.runtime.lastError;
       activePorts.delete(port);
       // NOTE: We DO NOT cancel runningTask when the side panel is closed!
       // This guarantees background execution continues and saves results.
@@ -2762,4 +2771,16 @@ if (chrome.commands && chrome.commands.onCommand) {
   });
 }
 
-console.log('⚡ Antigravity Agent background service worker initialized');
+// ─── Service Worker Keepalive Alarm ─────────────────────────────────────────
+if (chrome.alarms) {
+  try {
+    chrome.alarms.create('autono_sw_keepalive', { periodInMinutes: 1 });
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === 'autono_sw_keepalive') {
+        checkBridgeHealth().catch(() => null);
+      }
+    });
+  } catch (_) {}
+}
+
+console.log('⚡ Autono background service worker initialized');
