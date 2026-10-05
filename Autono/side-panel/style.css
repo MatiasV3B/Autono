@@ -4764,6 +4764,30 @@ html[data-chat-spacing="compact"] #messagesContainer {
   color: #22c55e;
 }
 
+.local-mcp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.local-mcp-status-pill.active {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.local-mcp-status-pill.inactive {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
 .mcp-server-desc {
   font-size: 11px;
   color: #a1a1aa;

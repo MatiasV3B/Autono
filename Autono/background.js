@@ -43,12 +43,14 @@ async function getSettings() {
     'antigravity_claude_mode',
     'antigravity_anthropic_api_key',
     'antigravity_openai_mode',
-    'antigravity_openai_api_key'
+    'antigravity_openai_api_key',
+    'autono_local_mcp_bridge_enabled',
   ]);
   const s = data.antigravity_settings || {};
   return {
     bridgeUrl: s.bridgeUrl || DEFAULT_BRIDGE_URL,
     selectedModel: s.selectedModel || DEFAULT_MODEL,
+    localMcpBridgeEnabled: s.localMcpBridgeEnabled !== undefined ? s.localMcpBridgeEnabled : (data.autono_local_mcp_bridge_enabled !== undefined ? Boolean(data.autono_local_mcp_bridge_enabled) : false),
     antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
     geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
     claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
@@ -612,6 +614,14 @@ async function saveSettings(settings) {
   if (settings.shadowPreventSleep !== undefined) {
     applyPowerKeepAwake(settings.shadowPreventSleep);
   }
+  if (settings.localMcpBridgeEnabled !== undefined) {
+    await chrome.storage.local.set({ autono_local_mcp_bridge_enabled: Boolean(settings.localMcpBridgeEnabled) });
+    if (settings.localMcpBridgeEnabled) {
+      startMcpBridgePoller();
+    } else {
+      stopMcpBridgePoller();
+    }
+  }
 }
 
 async function getSessions() {
@@ -724,8 +734,23 @@ async function refreshModelsList(baseUrl) {
 checkBridgeHealth();
 setInterval(checkBridgeHealth, 20000);
 
-// ─── Broadcast to Connected Panels ──────────────────────────────────────────
+// ─── Broadcast to Connected Panels & Internal Subsystems ────────────────────
+const internalMessageListeners = new Set();
+function addInternalListener(fn) {
+  internalMessageListeners.add(fn);
+}
+function removeInternalListener(fn) {
+  internalMessageListeners.delete(fn);
+}
+
 function broadcastMessage(payload) {
+  for (const fn of internalMessageListeners) {
+    try {
+      fn(payload);
+    } catch (e) {
+      console.warn('Internal listener error:', e);
+    }
+  }
   for (const port of [...activePorts]) {
     try {
       port.postMessage(payload);
@@ -2329,6 +2354,257 @@ async function executeScrollAction(tabId, direction) {
   }
 }
 
+// ─── Active Browser MCP Bridge Engine (Local Agent Control) ─────────────────
+let mcpBridgePollerActive = false;
+let mcpBridgeAbortController = null;
+
+async function startMcpBridgePoller() {
+  if (mcpBridgePollerActive) return;
+  mcpBridgePollerActive = true;
+  mcpBridgeAbortController = new AbortController();
+
+  console.log('[MCP Bridge] Starting active browser action listener...');
+
+  while (mcpBridgePollerActive) {
+    try {
+      const settings = await getSettings();
+      if (!settings.localMcpBridgeEnabled) {
+        mcpBridgePollerActive = false;
+        break;
+      }
+
+      const bridgeUrl = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+      const resp = await fetch(`${bridgeUrl}/api/mcp/pending_actions?timeout=15`, {
+        signal: mcpBridgeAbortController?.signal,
+      }).catch(() => null);
+
+      if (!resp || !resp.ok) {
+        // Model bridge might be offline; pause before retrying
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+
+      const data = await resp.json().catch(() => null);
+      if (data && data.has_action && data.action) {
+        const actionItem = data.action;
+        console.log('[MCP Bridge] Received action from local agent:', actionItem);
+        // Execute asynchronously so the poller doesn't get blocked
+        handleMcpAction(actionItem, bridgeUrl).catch((err) => {
+          console.error('[MCP Bridge] Error handling action:', err);
+        });
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        break;
+      }
+      console.warn('[MCP Bridge] Polling error:', err);
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+  }
+
+  mcpBridgePollerActive = false;
+  console.log('[MCP Bridge] Active browser action listener stopped.');
+}
+
+function stopMcpBridgePoller() {
+  mcpBridgePollerActive = false;
+  if (mcpBridgeAbortController) {
+    try {
+      mcpBridgeAbortController.abort();
+    } catch (_) {}
+    mcpBridgeAbortController = null;
+  }
+}
+
+async function handleMcpAction(actionItem, bridgeUrl) {
+  const { action_id, action, params } = actionItem;
+  let result = null;
+  let error = null;
+
+  try {
+    switch (action) {
+      case 'get_active_tab':
+      case 'browser_get_active_tab': {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab) throw new Error('No active browser tab found');
+
+        const pageData = {
+          id: tab.id,
+          title: tab.title || '',
+          url: tab.url || '',
+          status: tab.status,
+          textSnippet: '',
+          headings: [],
+        };
+
+        if (!isRestrictedUrl(tab.url)) {
+          try {
+            const [evalRes] = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: () => ({
+                text: document.body ? document.body.innerText.slice(0, 5000) : '',
+                headings: Array.from(document.querySelectorAll('h1, h2, h3'))
+                  .slice(0, 10)
+                  .map((h) => h.innerText.trim())
+                  .filter(Boolean),
+              }),
+            });
+            if (evalRes?.result) {
+              pageData.textSnippet = evalRes.result.text;
+              pageData.headings = evalRes.result.headings;
+            }
+          } catch (_) {}
+        }
+        result = pageData;
+        break;
+      }
+
+      case 'navigate':
+      case 'browser_navigate': {
+        let destUrl = params?.url || '';
+        if (!destUrl) throw new Error('Missing url parameter');
+        if (!/^https?:\/\//i.test(destUrl)) destUrl = 'https://' + destUrl;
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (tab?.id) {
+          await chrome.tabs.update(tab.id, { url: destUrl });
+          result = { success: true, navigatedTo: destUrl, tabId: tab.id };
+        } else {
+          const newTab = await chrome.tabs.create({ url: destUrl });
+          result = { success: true, createdTabId: newTab.id, navigatedTo: destUrl };
+        }
+        break;
+      }
+
+      case 'click':
+      case 'browser_click': {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab?.id) throw new Error('No active browser tab found to click');
+        const selector = params?.selector || '';
+        if (!selector) throw new Error('Missing selector parameter');
+        const clickRes = await executeClickAction(tab.id, selector);
+        result = { success: true, clicked: selector, details: clickRes };
+        break;
+      }
+
+      case 'type':
+      case 'browser_type': {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab?.id) throw new Error('No active browser tab found to type');
+        const selector = params?.selector || '';
+        const text = params?.text !== undefined ? String(params.text) : '';
+        if (!selector) throw new Error('Missing selector parameter');
+        const typeRes = await executeTypeAction(tab.id, selector, text);
+        result = { success: true, selector, text, details: typeRes };
+        break;
+      }
+
+      case 'screenshot':
+      case 'browser_screenshot': {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab) throw new Error('No active tab to capture');
+        const screenshotDataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+        result = { success: true, screenshot: screenshotDataUrl };
+        break;
+      }
+
+      case 'browser_task': {
+        const goal = params?.goal || '';
+        const mode = params?.mode || 'cowork';
+        if (!goal) throw new Error('Missing goal parameter');
+
+        let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab || !tab.id) {
+          const tabs = await chrome.tabs.query({ active: true });
+          tab = tabs[0];
+        }
+        if (!tab || !tab.id) {
+          throw new Error('No active browser tab found to execute task');
+        }
+
+        const taskId = 'mcp-task-' + Date.now();
+        const sessionId = 'mcp-session-' + Date.now();
+        const settings = await getSettings();
+        const modelName = settings.selectedModel || DEFAULT_MODEL;
+
+        if (mode === 'chat') {
+          result = await new Promise(async (resolve, reject) => {
+            let finalContent = '';
+            const listener = (msg) => {
+              if (msg.taskId === taskId) {
+                if (msg.type === 'token') {
+                  finalContent += msg.token;
+                } else if (msg.type === 'chat_complete') {
+                  removeInternalListener(listener);
+                  resolve({ taskId, content: finalContent || msg.content });
+                } else if (msg.type === 'task_error') {
+                  removeInternalListener(listener);
+                  reject(new Error(msg.error || 'Chat task failed'));
+                }
+              }
+            };
+            addInternalListener(listener);
+            handleChatStream(taskId, sessionId, goal, modelName, false, tab.id).catch((err) => {
+              removeInternalListener(listener);
+              reject(err);
+            });
+          });
+        } else {
+          result = await new Promise(async (resolve, reject) => {
+            const listener = (msg) => {
+              if (msg.taskId === taskId) {
+                if (msg.type === 'task_complete') {
+                  removeInternalListener(listener);
+                  resolve({
+                    taskId,
+                    status: 'completed',
+                    steps: msg.steps || [],
+                    summary: msg.summary || 'Task completed successfully',
+                  });
+                } else if (msg.type === 'task_error') {
+                  removeInternalListener(listener);
+                  reject(new Error(msg.error || 'Cowork task failed'));
+                } else if (msg.type === 'task_aborted') {
+                  removeInternalListener(listener);
+                  reject(new Error('Task was aborted'));
+                }
+              }
+            };
+            addInternalListener(listener);
+            handleCoworkTask(taskId, sessionId, goal, modelName, tab.id).catch((err) => {
+              removeInternalListener(listener);
+              reject(err);
+            });
+          });
+        }
+        break;
+      }
+
+      default:
+        throw new Error(`Unsupported browser action: ${action}`);
+    }
+  } catch (e) {
+    error = e.message || String(e);
+  }
+
+  // Report result back to Model Bridge
+  const payload = {
+    action_id,
+    status: error ? 'error' : 'ok',
+    result: error ? null : result,
+    error: error || null,
+  };
+
+  try {
+    await fetch(`${bridgeUrl}/api/mcp/action_result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (postErr) {
+    console.warn('[MCP Bridge] Failed to post action result to bridge:', postErr);
+  }
+}
+
 // ─── Session Persistence ───────────────────────────────────────────────────
 function cleanPromptForHistory(text) {
   if (!text || typeof text !== 'string') return '';
@@ -2778,9 +3054,34 @@ if (chrome.alarms) {
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === 'autono_sw_keepalive') {
         checkBridgeHealth().catch(() => null);
+        getSettings().then((s) => {
+          if (s.localMcpBridgeEnabled && !mcpBridgePollerActive) {
+            startMcpBridgePoller();
+          }
+        }).catch(() => null);
       }
     });
   } catch (_) {}
 }
 
-console.log('⚡ Autono background service worker initialized');
+// ─── Storage Changes Listener for MCP Bridge ───────────────────────────────
+if (chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.autono_local_mcp_bridge_enabled) {
+      if (changes.autono_local_mcp_bridge_enabled.newValue) {
+        startMcpBridgePoller();
+      } else {
+        stopMcpBridgePoller();
+      }
+    }
+  });
+}
+
+// Start MCP poller on initial boot if enabled
+getSettings().then((s) => {
+  if (s.localMcpBridgeEnabled) {
+    startMcpBridgePoller();
+  }
+}).catch(() => null);
+
+console.log('⚡ Autono background service worker initialized with Active Browser MCP Bridge support');

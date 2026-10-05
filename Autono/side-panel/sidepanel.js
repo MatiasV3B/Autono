@@ -3592,6 +3592,75 @@ marked.setOptions({
     });
   }
 
+  // ─── Local Agent MCP Server (Active Browser Bridge) ───────────────────────
+  const settingLocalMcpBridgeEnabled = document.getElementById('settingLocalMcpBridgeEnabled');
+  const localMcpStatusBadge = document.getElementById('localMcpStatusBadge');
+  const copyMcpConfigSnippetBtn = document.getElementById('copyMcpConfigSnippetBtn');
+  const mcpConfigSnippetCode = document.getElementById('mcpConfigSnippetCode');
+
+  async function updateLocalMcpStatusUI(isActive) {
+    if (!localMcpStatusBadge) return;
+    if (!isActive) {
+      localMcpStatusBadge.className = 'local-mcp-status-pill inactive';
+      localMcpStatusBadge.textContent = '● Desactivado';
+      return;
+    }
+
+    localMcpStatusBadge.className = 'local-mcp-status-pill active';
+    localMcpStatusBadge.textContent = '● Activo (Verificando...)';
+
+    try {
+      const currentBridge = (localStorage.getItem('antigravity_bridge_url') || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+      const resp = await fetch(`${currentBridge}/api/mcp/status`, { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) {
+        localMcpStatusBadge.className = 'local-mcp-status-pill active';
+        localMcpStatusBadge.textContent = '● Activo (127.0.0.1:8000)';
+      } else {
+        localMcpStatusBadge.className = 'local-mcp-status-pill active';
+        localMcpStatusBadge.textContent = '● Activo (Bridge listo)';
+      }
+    } catch (_) {
+      localMcpStatusBadge.className = 'local-mcp-status-pill active';
+      localMcpStatusBadge.textContent = '● Activo (Inicia Bridge)';
+    }
+  }
+
+  if (settingLocalMcpBridgeEnabled) {
+    settingLocalMcpBridgeEnabled.addEventListener('change', () => {
+      const isEnabled = settingLocalMcpBridgeEnabled.checked;
+      localStorage.setItem('autono_local_mcp_bridge_enabled', String(isEnabled));
+      chrome.storage.local.set({ autono_local_mcp_bridge_enabled: isEnabled });
+      updateLocalMcpStatusUI(isEnabled);
+
+      // Save into settings object as well
+      const saved = JSON.parse(localStorage.getItem('antigravity_settings') || '{}');
+      saved.localMcpBridgeEnabled = isEnabled;
+      localStorage.setItem('antigravity_settings', JSON.stringify(saved));
+      sendPortMessage({ type: 'save_settings', settings: saved });
+
+      showToast(isEnabled ? 'Servidor MCP para agentes locales activado' : 'Servidor MCP desactivado');
+    });
+  }
+
+  if (copyMcpConfigSnippetBtn && mcpConfigSnippetCode) {
+    copyMcpConfigSnippetBtn.addEventListener('click', async () => {
+      try {
+        const textToCopy = mcpConfigSnippetCode.innerText.trim();
+        await navigator.clipboard.writeText(textToCopy);
+        const originalText = copyMcpConfigSnippetBtn.textContent;
+        copyMcpConfigSnippetBtn.textContent = '✓ Copiado';
+        copyMcpConfigSnippetBtn.style.color = '#34d399';
+        showToast('Configuración MCP copiada al portapapeles');
+        setTimeout(() => {
+          copyMcpConfigSnippetBtn.textContent = originalText;
+          copyMcpConfigSnippetBtn.style.color = '#bfdbfe';
+        }, 2200);
+      } catch (err) {
+        showToast('Error al copiar configuración');
+      }
+    });
+  }
+
   // ─── External Providers Management (Up to 5 third-party providers) ─────────
   function saveExternalProvidersToStorage() {
     try {
@@ -4036,6 +4105,15 @@ marked.setOptions({
 
     const waitInstantInput = document.getElementById('settingWaitMessageSentOutInstantly');
     if (waitInstantInput && s.waitMessageSentOutInstantly !== undefined) waitInstantInput.checked = Boolean(s.waitMessageSentOutInstantly);
+
+    // Local Agent MCP Server (Active Browser Bridge)
+    const localMcpEnabledInput = document.getElementById('settingLocalMcpBridgeEnabled');
+    const savedLocalMcp = localStorage.getItem('autono_local_mcp_bridge_enabled');
+    const isLocalMcpActive = s.localMcpBridgeEnabled !== undefined ? Boolean(s.localMcpBridgeEnabled) : (savedLocalMcp === 'true');
+    if (localMcpEnabledInput) {
+      localMcpEnabledInput.checked = isLocalMcpActive;
+    }
+    updateLocalMcpStatusUI(isLocalMcpActive);
 
     renderSkillChips();
     renderMcpServersList();
@@ -4510,6 +4588,7 @@ marked.setOptions({
       workingOverlay: document.getElementById('settingWorkingOverlay')?.checked ?? true,
       tabLockedSidebar: document.getElementById('settingTabLockedSidebar')?.checked ?? false,
       waitMessageSentOutInstantly: document.getElementById('settingWaitMessageSentOutInstantly')?.checked ?? true,
+      localMcpBridgeEnabled: document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false,
       userName,
       userNickname: userNick,
       customSkills,
@@ -4530,6 +4609,9 @@ marked.setOptions({
     try {
       localStorage.setItem('antigravity_settings', JSON.stringify(newSettings));
     } catch (_) {}
+
+    localStorage.setItem('autono_local_mcp_bridge_enabled', String(newSettings.localMcpBridgeEnabled));
+    updateLocalMcpStatusUI(newSettings.localMcpBridgeEnabled);
 
     sendPortMessage({ type: 'save_settings', settings: newSettings });
 
