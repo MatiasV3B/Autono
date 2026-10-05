@@ -29,6 +29,7 @@ let bridgeOnline = false;
 let availableModels = [...PRELOADED_MODELS];
 let cachedCliQuota = null;
 let runningTask = null; // { taskId, mode, tabId, status, abortController, steps: [] }
+let disabledSidePanelTabs = new Set();
 
 // ─── Setup Side Panel Behavior ──────────────────────────────────────────────
 if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
@@ -370,24 +371,16 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Tab-Locked Sidebar listener (auto closes/hides when navigating to unrelated tabs ONLY during active Cowork tasks)
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
-    const activeTabId = activeInfo.tabId;
-    const settings = await getSettings();
-    const activeTab = await chrome.tabs.get(activeTabId).catch(() => null);
-
-    // Chat mode or idle mode: ensure sidePanel stays enabled for all tabs and NEVER close it!
+    // When idle or in chat mode: NEVER manipulate the side panel or tab options on focus/tab change!
     const isCoworkActive = runningTask && runningTask.mode === 'cowork' && (runningTask.status === 'running' || runningTask.status === 'paused');
 
     if (!isCoworkActive || !runningTask?.tabId) {
-      // In chat mode or when no cowork task is active, side panel remains fully accessible and never auto-closes
-      if (chrome.sidePanel?.setOptions) {
-        await chrome.sidePanel.setOptions({
-          tabId: activeTabId,
-          enabled: true,
-          path: 'side-panel/index.html',
-        }).catch(() => null);
-      }
       return;
     }
+
+    const activeTabId = activeInfo.tabId;
+    const settings = await getSettings();
+    const activeTab = await chrome.tabs.get(activeTabId).catch(() => null);
 
     // Active Cowork task logic:
     const workTabId = runningTask.tabId;
@@ -404,6 +397,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
           path: 'side-panel/index.html',
         }).catch(() => null);
       }
+      disabledSidePanelTabs.delete(activeTabId);
       if (chrome.sidePanel?.open) {
         chrome.sidePanel.open({ tabId: activeTabId })
           .catch(() => activeTab?.windowId ? chrome.sidePanel.open({ windowId: activeTab.windowId }).catch(() => null) : null);
@@ -417,6 +411,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
             tabId: activeTabId,
             enabled: false,
           }).catch(() => null);
+          disabledSidePanelTabs.add(activeTabId);
         }
         if (chrome.sidePanel?.close) {
           chrome.sidePanel.close({ windowId: activeTab?.windowId }).catch(() => null);
@@ -432,6 +427,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 // When working tab is closed -> pause task, save tab link, and pause chat
 chrome.tabs.onRemoved.addListener(async (closedTabId) => {
   try {
+    disabledSidePanelTabs.delete(closedTabId);
     if (!runningTask || runningTask.tabId !== closedTabId) return;
 
     const savedUrl = runningTask.lastKnownUrl || 'https://google.com';
@@ -1921,6 +1917,15 @@ ${summary ? `> ${summary}\n` : ''}
   } finally {
     if (tabId) {
       await triggerWorkOverlay(tabId, false);
+    }
+    if (disabledSidePanelTabs.size > 0 && chrome.sidePanel?.setOptions) {
+      for (const tId of disabledSidePanelTabs) {
+        chrome.sidePanel.setOptions({
+          tabId: tId,
+          enabled: true,
+        }).catch(() => null);
+      }
+      disabledSidePanelTabs.clear();
     }
     runningTask = null;
   }
