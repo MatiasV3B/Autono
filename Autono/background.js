@@ -100,25 +100,18 @@ function getProviderModes(modelName, settings) {
   };
 }
 
-async function resolveInferenceEndpoint(modelName, defaultBase) {
+async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider = null) {
   const settings = await getSettings();
-  if (!modelName) {
-    const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer sk-antigravity' };
-    if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
-    if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
-    if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
-    if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
-    if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
-    if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
-    return { url: `${defaultBase}/v1/chat/completions`, headers, model: DEFAULT_MODEL };
-  }
+  const cleanBase = (defaultBase || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+  const targetModel = modelName || DEFAULT_MODEL;
+
   const extProviders = await getExternalProviders();
   for (const prov of extProviders) {
-    const hasModel = (prov.models || []).some(m => m.id === modelName);
-    if (hasModel || modelName.startsWith(`${prov.id}:`)) {
-      const actualModel = modelName.includes(':') ? modelName.split(':')[1] : modelName;
-      const cleanBase = (prov.baseUrl || '').replace(/\/+$/, '');
-      const url = cleanBase.endsWith('/v1') ? `${cleanBase}/chat/completions` : `${cleanBase}/v1/chat/completions`;
+    const hasModel = (prov.models || []).some(m => m.id === targetModel);
+    if (hasModel || targetModel.startsWith(`${prov.id}:`)) {
+      const actualModel = targetModel.includes(':') ? targetModel.split(':')[1] : targetModel;
+      const cleanProvBase = (prov.baseUrl || '').replace(/\/+$/, '');
+      const url = cleanProvBase.endsWith('/v1') ? `${cleanProvBase}/chat/completions` : `${cleanProvBase}/v1/chat/completions`;
       const headers = { 'Content-Type': 'application/json' };
       if (prov.apiKey) {
         headers['Authorization'] = `Bearer ${prov.apiKey}`;
@@ -126,31 +119,46 @@ async function resolveInferenceEndpoint(modelName, defaultBase) {
       return { url, headers, model: actualModel };
     }
   }
+
+  const isClaude = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('claude') || targetModel.toLowerCase().includes('opus') || targetModel.toLowerCase().includes('sonnet') || targetModel.toLowerCase().includes('haiku') || targetModel.toLowerCase().includes('fable'));
+  const isGpt = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('gpt') || targetModel.toLowerCase().includes('openai') || targetModel.toLowerCase().includes('codex') || targetModel.toLowerCase().includes('o3'));
+
+  let provider = explicitProvider;
+  if (!provider) {
+    if (isClaude) {
+      provider = 'claude';
+    } else if (isGpt) {
+      provider = 'openai';
+    } else {
+      provider = 'antigravity';
+    }
+  }
+  if (provider === 'cloud') provider = 'claude';
+  if (!['antigravity', 'claude', 'openai'].includes(provider)) {
+    provider = 'antigravity';
+  }
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer sk-antigravity',
+    'x-provider': provider,
   };
-  const isClaude = typeof modelName === 'string' && (modelName.toLowerCase().includes('claude') || modelName.toLowerCase().includes('opus') || modelName.toLowerCase().includes('sonnet') || modelName.toLowerCase().includes('haiku') || modelName.toLowerCase().includes('fable'));
-  const isGptOss = typeof modelName === 'string' && modelName.toLowerCase().includes('oss');
-  const isGemini = !isClaude && !isGptOss && typeof modelName === 'string' && modelName.toLowerCase().includes('gemini');
 
-  if (isGemini) {
+  if (provider === 'antigravity') {
     if (settings.antigravityMode) headers['x-antigravity-mode'] = settings.antigravityMode;
     if (settings.geminiApiKey) headers['x-gemini-key'] = settings.geminiApiKey;
-  }
-  if (isClaude) {
+  } else if (provider === 'claude') {
     if (settings.claudeMode) headers['x-claude-mode'] = settings.claudeMode;
     if (settings.anthropicApiKey) headers['x-api-key'] = settings.anthropicApiKey;
-  }
-  if (!isClaude && !isGemini) {
+  } else if (provider === 'openai') {
     if (settings.openaiMode) headers['x-openai-mode'] = settings.openaiMode;
     if (settings.openaiApiKey) headers['x-openai-key'] = settings.openaiApiKey;
   }
 
   return {
-    url: `${defaultBase}/v1/chat/completions`,
+    url: `${cleanBase}/${provider}/v1/chat/completions`,
     headers,
-    model: modelName,
+    model: targetModel,
   };
 }
 
@@ -175,10 +183,10 @@ function updateExtensionIcon(modelId) {
     };
   } else {
     path = {
-      "16": "assets/icon-16.png",
-      "32": "assets/icon-32.png",
-      "48": "assets/icon-48.png",
-      "128": "assets/icon-128.png"
+      "16": "assets/antigravity-icon-16.png",
+      "32": "assets/antigravity-icon-32.png",
+      "48": "assets/antigravity-icon-48.png",
+      "128": "assets/antigravity-icon-128.png"
     };
   }
   try {
@@ -1027,7 +1035,7 @@ async function getPageContext(tabId, includeScreenshot = false) {
 }
 
 // ─── Mode 1: Chat Execution (Fast, Full-Screen JSON, Streaming) ─────────────
-async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort) {
+async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider = null) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
   const abortController = new AbortController();
@@ -1186,7 +1194,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
     }
 
     const targetModel = modelName || settings.selectedModel || DEFAULT_MODEL;
-    const { url: endpointUrl, headers: endpointHeaders, model: resolvedModel } = await resolveInferenceEndpoint(targetModel, base);
+    const { url: endpointUrl, headers: endpointHeaders, model: resolvedModel } = await resolveInferenceEndpoint(targetModel, base, explicitProvider);
 
     const effortMap = {
       'fast': 0,
@@ -1337,7 +1345,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
 }
 
 /// ─── Mode 2: Cowork Execution (Action Steps & Browser Control) ──────────────
-async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId) {
+async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId, thinkingEffort = null, explicitProvider = null) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
   const abortController = new AbortController();
@@ -1458,7 +1466,7 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
     let planIntro = '';
     let planData = null;
     try {
-      const { url: planUrl, headers: planHeaders, model: resolvedPlanModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base);
+      const { url: planUrl, headers: planHeaders, model: resolvedPlanModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
       const planRes = await fetch(planUrl, {
         method: 'POST',
         headers: planHeaders,
@@ -1627,7 +1635,7 @@ You MUST reply ONLY with a JSON block with this strict format:
   "description": "User-friendly description in English of what you are doing"
 }`;
 
-      const { url: stepUrl, headers: stepHeaders, model: resolvedStepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base);
+      const { url: stepUrl, headers: stepHeaders, model: resolvedStepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
       const res = await fetch(stepUrl, {
         method: 'POST',
         headers: stepHeaders,
@@ -1823,7 +1831,7 @@ Formatting instructions:
 
     let finalReportMarkdown = '';
     try {
-      const { url: repUrl, headers: repHeaders, model: resolvedRepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base);
+      const { url: repUrl, headers: repHeaders, model: resolvedRepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
       const repRes = await fetch(repUrl, {
         method: 'POST',
         headers: repHeaders,
@@ -2734,7 +2742,7 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               hasScreenshot: !!msg.includeScreenshot,
             });
-            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort);
+            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort, msg.provider);
             break;
           }
 
@@ -2755,7 +2763,7 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               mode: 'cowork',
             });
-            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort);
+            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort, msg.provider);
             break;
           }
 

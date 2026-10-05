@@ -1355,9 +1355,23 @@ marked.setOptions({
   }
 
   function updateDynamicBranding(modelId) {
-    const isClaude = isClaudeModel(modelId);
-    const isAntigravity = (modelId === 'gpt-oss-120b-medium' && activeModelTab === 'antigravity') || (!isClaude && !isOpenAIModel(modelId));
-    const isOpenAI = !isClaude && !isAntigravity && isOpenAIModel(modelId);
+    let isClaude = activeModelTab === 'claude' || isClaudeModel(modelId);
+    let isOpenAI = activeModelTab === 'openai' || (!isClaude && isOpenAIModel(modelId));
+    let isAntigravity = activeModelTab === 'antigravity' || (!isClaude && !isOpenAI);
+
+    if (activeModelTab === 'claude') {
+      isClaude = true;
+      isOpenAI = false;
+      isAntigravity = false;
+    } else if (activeModelTab === 'openai') {
+      isClaude = false;
+      isOpenAI = true;
+      isAntigravity = false;
+    } else if (activeModelTab === 'antigravity') {
+      isClaude = false;
+      isOpenAI = false;
+      isAntigravity = true;
+    }
 
     // 1. Welcome hero avatar & title
     const welcomeAvatarImg = document.getElementById('welcomeAvatarImg');
@@ -1387,12 +1401,46 @@ marked.setOptions({
         : (isOpenAI ? 'Send a message to ChatGPT...' : 'Send a message to Antigravity...');
     }
 
-    // 3. Extension Action Icon in Chrome toolbar
+    // 3. Top Trigger Icon in Header (dynamically reflects selected provider)
+    const trigIcon = document.getElementById('modelTriggerIcon');
+    if (trigIcon) {
+      if (isOpenAI) {
+        trigIcon.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="#ffffff" style="color:#ffffff;">
+          <path fill="#ffffff" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1683a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4947zm-9.66-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1402-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.02 1.1683a.0757.0757 0 0 1-.071 0l-4.8303-2.7866A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1636a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
+        </svg>`;
+      } else if (isClaude) {
+        trigIcon.innerHTML = `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Claude">`;
+      } else {
+        trigIcon.innerHTML = `<img src="../assets/antigravity-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Antigravity">`;
+      }
+    }
+
+    // 4. Document title & Favicon
+    try {
+      if (isClaude) {
+        document.title = 'Claude - Autono';
+      } else if (isOpenAI) {
+        document.title = 'ChatGPT - Autono';
+      } else {
+        document.title = 'Antigravity - Autono';
+      }
+      let linkFavicon = document.querySelector("link[rel*='icon']");
+      if (!linkFavicon) {
+        linkFavicon = document.createElement('link');
+        linkFavicon.rel = 'icon';
+        document.head.appendChild(linkFavicon);
+      }
+      linkFavicon.href = isClaude 
+        ? '../assets/claude-icon-32.png' 
+        : (isOpenAI ? '../assets/chatgpt-icon-32.png' : '../assets/antigravity-icon-32.png');
+    } catch (_) {}
+
+    // 5. Extension Action Icon in Chrome toolbar
     try {
       if (chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({
           type: 'update_extension_icon',
-          model: modelId
+          model: isOpenAI ? 'gpt' : (isClaude ? 'claude' : 'antigravity')
         }).catch(() => null);
       }
     } catch (_) {}
@@ -1447,17 +1495,8 @@ marked.setOptions({
       }
     }
 
-    // Update trigger icon with matching provider SVG / Image
-    const trigIcon = document.getElementById('modelTriggerIcon');
-    if (trigIcon) {
-      if (activeModelTab === 'openai' || isOpenAIModel(model.id)) {
-        trigIcon.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="#ffffff" style="color:#ffffff;">
-          <path fill="#ffffff" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1683a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4947zm-9.66-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1402-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.02 1.1683a.0757.0757 0 0 1-.071 0l-4.8303-2.7866A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1636a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
-        </svg>`;
-      } else if (provider.iconSvg) {
-        trigIcon.innerHTML = provider.iconSvg;
-      }
-    }
+    // Update dynamic branding (Header icon, Welcome hero avatar, heading, placeholder, extension icon, title)
+    updateDynamicBranding(model.id);
 
     // Update trigger label
     if (selectedModelLabel) {
@@ -2560,6 +2599,7 @@ marked.setOptions({
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
         includeScreenshot: !!screenshotToSend,
+        provider: activeModelTab || 'antigravity',
       });
     } else {
       sendPortMessage({
@@ -2570,6 +2610,7 @@ marked.setOptions({
         displayGoal: displayPrompt,
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
+        provider: activeModelTab || 'antigravity',
       });
     }
 
@@ -5748,11 +5789,13 @@ You are a world-class principal software engineer.
 
     try {
       const bridgeUrl = (settingBridgeUrl?.value || 'http://127.0.0.1:8765').trim().replace(/\/+$/, '');
-      const resp = await fetch(`${bridgeUrl}/v1/chat/completions`, {
+      const provider = activeModelTab || 'antigravity';
+      const resp = await fetch(`${bridgeUrl}/${provider}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer sk-antigravity',
+          'x-provider': provider,
         },
         body: JSON.stringify({
           messages: [
@@ -7607,11 +7650,13 @@ Follow these strict guidelines:
 3. Keep the prompt concise yet comprehensive and self-contained.
 4. Return ONLY the enhanced prompt text itself. Do NOT include any intro ("Here is the enhanced prompt:"), meta-commentary, explanations, quotes, or markdown backticks enclosing the entire prompt.`;
 
-      const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      const provider = activeModelTab || 'antigravity';
+      const response = await fetch(`${baseUrl}/${provider}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer sk-antigravity',
+          'x-provider': provider,
         },
         body: JSON.stringify({
           model: targetModel,

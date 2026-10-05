@@ -12,7 +12,7 @@
   --text-main: #ececec;
   --text-muted: #b4b4b4;
   --text-sub: #737373;
-  --accent-search: #1EAEDB;
+  --accent-search: #38bdf8;
   --accent-think: #8B5CF6;
   --accent-cowork: #F97316;
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -456,7 +456,7 @@ body {
 }
 
 .check-mark {
-  color: #10a37f;
+  color: #38bdf8;
   font-size: 12px;
 }
 
@@ -499,12 +499,12 @@ body {
 }
 
 .cap-chip.cap-vision {
-  color: #2dd4bf;
+  color: #38bdf8;
 }
 
 .cap-chip.cap-vision:hover {
-  background: rgba(45, 212, 191, 0.15);
-  border-color: rgba(45, 212, 191, 0.3);
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.3);
 }
 
 .thinking-footer {
@@ -1134,7 +1134,7 @@ body {
 }
 
 .step-result {
-  color: #10a37f;
+  color: #38bdf8;
   font-weight: 500;
 }
 
@@ -1395,10 +1395,10 @@ body {
 
 /* Active State for Action Pills with smooth spring & glow */
 #toggleSearchBtn.active {
-  background: rgba(30, 174, 219, 0.18);
-  border-color: #1EAEDB;
-  color: #1EAEDB;
-  box-shadow: 0 0 10px rgba(30, 174, 219, 0.35);
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
   transform: scale(1.04);
 }
 #toggleSearchBtn.active .pill-icon {
@@ -2778,7 +2778,7 @@ html[data-chat-spacing="compact"] #messagesContainer {
 }
 
 .attach-menu-item#attachTabsBtn svg {
-  color: #2dd4bf;
+  color: #38bdf8;
 }
 
 .attach-menu-item#attachScreenshotBtn svg {
