@@ -6,6 +6,7 @@
   'use strict';
 
   const bridgeUrlInput = document.getElementById('bridgeUrl');
+  const localMcpUrlInput = document.getElementById('localMcpUrl');
   const defaultModelSelect = document.getElementById('defaultModel');
   const tempInput = document.getElementById('temperature');
   const tempValue = document.getElementById('tempValue');
@@ -44,6 +45,10 @@
     const limits = data.antigravity_custom_limits || {};
 
     if (s.bridgeUrl) bridgeUrlInput.value = s.bridgeUrl;
+    const localMcpData = await chrome.storage.local.get('autono_local_mcp_url');
+    if (localMcpUrlInput) {
+      localMcpUrlInput.value = s.localMcpUrl || localMcpData.autono_local_mcp_url || `${s.bridgeUrl || 'http://127.0.0.1:8765'}/mcp/sse`;
+    }
     if (s.selectedModel) defaultModelSelect.value = s.selectedModel;
     if (s.temperature !== undefined) {
       tempInput.value = s.temperature;
@@ -105,6 +110,7 @@
   async function saveSettings() {
     const settings = {
       bridgeUrl: bridgeUrlInput.value.trim() || 'http://127.0.0.1:8765',
+      localMcpUrl: localMcpUrlInput ? localMcpUrlInput.value.trim() : `${bridgeUrlInput.value.trim()}/mcp/sse`,
       selectedModel: defaultModelSelect.value,
       temperature: parseFloat(tempInput.value),
       maxSteps: parseInt(maxStepsInput.value, 10) || 20,
@@ -122,6 +128,10 @@
       'claude-opus-4-6-thinking': parseInt(limitOpusInput.value, 10) || 20,
       'gpt-oss-120b-medium': parseInt(limitGptInput.value, 10) || 80,
     };
+
+    if (localMcpUrlInput) {
+      await chrome.storage.local.set({ autono_local_mcp_url: localMcpUrlInput.value.trim() });
+    }
 
     await chrome.storage.local.set({
       antigravity_settings: settings,

@@ -45,12 +45,14 @@ async function getSettings() {
     'antigravity_openai_mode',
     'antigravity_openai_api_key',
     'autono_local_mcp_bridge_enabled',
+    'autono_local_mcp_url',
   ]);
   const s = data.antigravity_settings || {};
   return {
     bridgeUrl: s.bridgeUrl || DEFAULT_BRIDGE_URL,
     selectedModel: s.selectedModel || DEFAULT_MODEL,
     localMcpBridgeEnabled: s.localMcpBridgeEnabled !== undefined ? s.localMcpBridgeEnabled : (data.autono_local_mcp_bridge_enabled !== undefined ? Boolean(data.autono_local_mcp_bridge_enabled) : false),
+    localMcpUrl: s.localMcpUrl || data.autono_local_mcp_url || `${s.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`,
     antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
     geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
     claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
@@ -620,6 +622,13 @@ async function saveSettings(settings) {
       startMcpBridgePoller();
     } else {
       stopMcpBridgePoller();
+    }
+  }
+  if (settings.localMcpUrl !== undefined) {
+    await chrome.storage.local.set({ autono_local_mcp_url: settings.localMcpUrl });
+    if (mcpBridgePollerActive) {
+      stopMcpBridgePoller();
+      startMcpBridgePoller();
     }
   }
 }
@@ -2373,8 +2382,16 @@ async function startMcpBridgePoller() {
         break;
       }
 
-      const bridgeUrl = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
-      const resp = await fetch(`${bridgeUrl}/api/mcp/pending_actions?timeout=15`, {
+      const rawMcp = settings.localMcpUrl || `${settings.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`;
+      let mcpBridgeBaseUrl;
+      try {
+        const u = new URL(rawMcp.startsWith('http') ? rawMcp : `http://${rawMcp}`);
+        mcpBridgeBaseUrl = `${u.protocol}//${u.host}`;
+      } catch (_) {
+        mcpBridgeBaseUrl = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+      }
+
+      const resp = await fetch(`${mcpBridgeBaseUrl}/api/mcp/pending_actions?timeout=15`, {
         signal: mcpBridgeAbortController?.signal,
       }).catch(() => null);
 
@@ -2389,7 +2406,7 @@ async function startMcpBridgePoller() {
         const actionItem = data.action;
         console.log('[MCP Bridge] Received action from local agent:', actionItem);
         // Execute asynchronously so the poller doesn't get blocked
-        handleMcpAction(actionItem, bridgeUrl).catch((err) => {
+        handleMcpAction(actionItem, mcpBridgeBaseUrl).catch((err) => {
           console.error('[MCP Bridge] Error handling action:', err);
         });
       }
@@ -3067,11 +3084,16 @@ if (chrome.alarms) {
 // ─── Storage Changes Listener for MCP Bridge ───────────────────────────────
 if (chrome.storage && chrome.storage.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.autono_local_mcp_bridge_enabled) {
-      if (changes.autono_local_mcp_bridge_enabled.newValue) {
-        startMcpBridgePoller();
-      } else {
+    if (area === 'local') {
+      if (changes.autono_local_mcp_bridge_enabled) {
+        if (changes.autono_local_mcp_bridge_enabled.newValue) {
+          startMcpBridgePoller();
+        } else {
+          stopMcpBridgePoller();
+        }
+      } else if (changes.autono_local_mcp_url && mcpBridgePollerActive) {
         stopMcpBridgePoller();
+        startMcpBridgePoller();
       }
     }
   });

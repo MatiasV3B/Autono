@@ -3598,26 +3598,131 @@ marked.setOptions({
   const copyMcpConfigSnippetBtn = document.getElementById('copyMcpConfigSnippetBtn');
   const copyMcpUrlBtn = document.getElementById('copyMcpUrlBtn');
   const mcpConfigSnippetCode = document.getElementById('mcpConfigSnippetCode');
+  const settingLocalMcpUrl = document.getElementById('settingLocalMcpUrl');
+  const testMcpUrlBtn = document.getElementById('testMcpUrlBtn');
+  const syncMcpWithBridgeBtn = document.getElementById('syncMcpWithBridgeBtn');
 
   function getActiveBridgeBaseUrl() {
     return (localStorage.getItem('antigravity_bridge_url') || settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
   }
 
+  function getFullMcpSseUrl() {
+    let url = settingLocalMcpUrl?.value?.trim() || localStorage.getItem('autono_local_mcp_url') || `${getActiveBridgeBaseUrl()}/mcp/sse`;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `http://${url}`;
+    }
+    if (!url.includes('/mcp')) {
+      url = url.replace(/\/+$/, '') + '/mcp/sse';
+    } else if (url.endsWith('/mcp')) {
+      url = `${url}/sse`;
+    }
+    return url;
+  }
+
+  function getMcpBaseUrl() {
+    const full = getFullMcpSseUrl();
+    try {
+      const u = new URL(full);
+      return `${u.protocol}//${u.host}`;
+    } catch (_) {
+      return getActiveBridgeBaseUrl();
+    }
+  }
+
   function refreshMcpSnippet() {
     if (!mcpConfigSnippetCode) return;
-    const currentBridge = getActiveBridgeBaseUrl();
+    const mcpUrl = getFullMcpSseUrl();
     const snippet = {
       "mcpServers": {
         "autono-browser": {
-          "url": `${currentBridge}/mcp/sse`
+          "url": mcpUrl
         }
       }
     };
     mcpConfigSnippetCode.textContent = JSON.stringify(snippet, null, 2);
   }
 
+  function onMcpUrlChanged(notifySave = true) {
+    const val = getFullMcpSseUrl();
+    localStorage.setItem('autono_local_mcp_url', val);
+    chrome.storage.local.set({ autono_local_mcp_url: val });
+    refreshMcpSnippet();
+    const isEnabled = document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false;
+    updateLocalMcpStatusUI(isEnabled);
+
+    if (notifySave) {
+      const saved = JSON.parse(localStorage.getItem('antigravity_settings') || '{}');
+      saved.localMcpUrl = val;
+      localStorage.setItem('antigravity_settings', JSON.stringify(saved));
+      sendPortMessage({ type: 'save_settings', settings: saved });
+    }
+  }
+
+  if (settingLocalMcpUrl) {
+    settingLocalMcpUrl.addEventListener('input', refreshMcpSnippet);
+    settingLocalMcpUrl.addEventListener('change', () => onMcpUrlChanged(true));
+  }
+
+  // Quick port preset buttons (8765, 8888, 9000, 9090)
+  document.querySelectorAll('.mcp-port-preset-btn[data-port]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const targetPort = btn.getAttribute('data-port');
+      if (!targetPort) return;
+      const targetInput = document.getElementById('settingLocalMcpUrl');
+      if (!targetInput) return;
+      try {
+        const cur = targetInput.value.trim() || 'http://127.0.0.1:8765/mcp/sse';
+        const u = new URL(cur.startsWith('http') ? cur : `http://${cur}`);
+        u.port = targetPort;
+        if (!u.pathname || u.pathname === '/') u.pathname = '/mcp/sse';
+        targetInput.value = `${u.protocol}//${u.hostname}:${targetPort}${u.pathname.endsWith('/mcp/sse') ? u.pathname : '/mcp/sse'}`;
+      } catch (_) {
+        targetInput.value = `http://127.0.0.1:${targetPort}/mcp/sse`;
+      }
+      onMcpUrlChanged(true);
+      showToast(`Puerto MCP cambiado a :${targetPort}`);
+    });
+  });
+
+  // Sync MCP port with Bridge URL
+  if (syncMcpWithBridgeBtn) {
+    syncMcpWithBridgeBtn.addEventListener('click', () => {
+      const bridgeBase = getActiveBridgeBaseUrl();
+      const targetInput = document.getElementById('settingLocalMcpUrl');
+      if (targetInput) {
+        targetInput.value = `${bridgeBase}/mcp/sse`;
+        onMcpUrlChanged(true);
+        showToast('URL MCP sincronizada con el Bridge');
+      }
+    });
+  }
+
+  // Test connection to MCP URL endpoint
+  if (testMcpUrlBtn) {
+    testMcpUrlBtn.addEventListener('click', async () => {
+      const base = getMcpBaseUrl();
+      const orig = testMcpUrlBtn.textContent;
+      testMcpUrlBtn.textContent = '...';
+      try {
+        const resp = await fetch(`${base}/api/mcp/status`, { signal: AbortSignal.timeout(2500) });
+        if (resp.ok) {
+          showToast(`✓ Conectado a ${base} (MCP Online)`);
+          updateLocalMcpStatusUI(true);
+        } else {
+          showToast(`⚠️ Servidor respondió con código ${resp.status}`);
+        }
+      } catch (err) {
+        showToast(`❌ No se pudo conectar a ${base}. Verifica que Model Bridge esté ejecutándose en ese puerto.`);
+      } finally {
+        testMcpUrlBtn.textContent = orig;
+      }
+    });
+  }
+
   if (settingBridgeUrl) {
-    settingBridgeUrl.addEventListener('input', refreshMcpSnippet);
+    settingBridgeUrl.addEventListener('input', () => {
+      refreshMcpSnippet();
+    });
   }
 
   async function updateLocalMcpStatusUI(isActive) {
@@ -3633,13 +3738,13 @@ marked.setOptions({
     localMcpStatusBadge.textContent = '● Activo (Verificando...)';
 
     try {
-      const currentBridge = getActiveBridgeBaseUrl();
-      const resp = await fetch(`${currentBridge}/api/mcp/status`, { signal: AbortSignal.timeout(2000) });
+      const currentMcpBase = getMcpBaseUrl();
+      const resp = await fetch(`${currentMcpBase}/api/mcp/status`, { signal: AbortSignal.timeout(2000) });
       if (resp.ok) {
         const data = await resp.json().catch(() => ({}));
         let displayHostPort = '8765';
         try {
-          const u = new URL(currentBridge);
+          const u = new URL(currentMcpBase);
           displayHostPort = u.port || (u.protocol === 'https:' ? '443' : '80');
         } catch (_) {}
         if (data.port) displayHostPort = data.port;
@@ -3665,6 +3770,7 @@ marked.setOptions({
       // Save into settings object as well
       const saved = JSON.parse(localStorage.getItem('antigravity_settings') || '{}');
       saved.localMcpBridgeEnabled = isEnabled;
+      saved.localMcpUrl = getFullMcpSseUrl();
       localStorage.setItem('antigravity_settings', JSON.stringify(saved));
       sendPortMessage({ type: 'save_settings', settings: saved });
 
@@ -3675,8 +3781,7 @@ marked.setOptions({
   if (copyMcpUrlBtn) {
     copyMcpUrlBtn.addEventListener('click', async () => {
       try {
-        const currentBridge = getActiveBridgeBaseUrl();
-        const urlToCopy = `${currentBridge}/mcp/sse`;
+        const urlToCopy = getFullMcpSseUrl();
         await navigator.clipboard.writeText(urlToCopy);
         const originalText = copyMcpUrlBtn.textContent;
         copyMcpUrlBtn.textContent = '✓ Copiado';
@@ -4166,6 +4271,11 @@ marked.setOptions({
     if (localMcpEnabledInput) {
       localMcpEnabledInput.checked = isLocalMcpActive;
     }
+    const localMcpUrlInput = document.getElementById('settingLocalMcpUrl');
+    const savedLocalMcpUrl = s.localMcpUrl || localStorage.getItem('autono_local_mcp_url');
+    if (localMcpUrlInput && savedLocalMcpUrl) {
+      localMcpUrlInput.value = savedLocalMcpUrl;
+    }
     updateLocalMcpStatusUI(isLocalMcpActive);
 
     renderSkillChips();
@@ -4642,6 +4752,7 @@ marked.setOptions({
       tabLockedSidebar: document.getElementById('settingTabLockedSidebar')?.checked ?? false,
       waitMessageSentOutInstantly: document.getElementById('settingWaitMessageSentOutInstantly')?.checked ?? true,
       localMcpBridgeEnabled: document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false,
+      localMcpUrl: getFullMcpSseUrl(),
       userName,
       userNickname: userNick,
       customSkills,
@@ -4664,6 +4775,8 @@ marked.setOptions({
     } catch (_) {}
 
     localStorage.setItem('autono_local_mcp_bridge_enabled', String(newSettings.localMcpBridgeEnabled));
+    localStorage.setItem('autono_local_mcp_url', newSettings.localMcpUrl);
+    chrome.storage.local.set({ autono_local_mcp_url: newSettings.localMcpUrl });
     updateLocalMcpStatusUI(newSettings.localMcpBridgeEnabled);
     refreshMcpSnippet();
 

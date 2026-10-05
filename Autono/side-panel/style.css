@@ -4788,6 +4788,38 @@ html[data-chat-spacing="compact"] #messagesContainer {
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.mcp-port-preset-btn {
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.mcp-port-preset-btn:hover {
+  background: rgba(37, 99, 235, 0.25);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+  transform: translateY(-1px);
+}
+
+.mcp-port-preset-btn.sync {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+}
+
+.mcp-port-preset-btn.sync:hover {
+  background: rgba(37, 99, 235, 0.35);
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
 .mcp-server-desc {
   font-size: 11px;
   color: #a1a1aa;

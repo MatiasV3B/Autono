@@ -23,6 +23,12 @@
       </div>
 
       <div class="form-group">
+        <label for="localMcpUrl">URL del Servidor MCP Local (SSE / Localhost):</label>
+        <input type="text" id="localMcpUrl" value="http://127.0.0.1:8765/mcp/sse">
+        <span class="help-text">Endpoint donde los agentes locales (Claude Code, Cursor, etc.) se conectan a tu navegador activo.</span>
+      </div>
+
+      <div class="form-group">
         <label for="defaultModel">Modelo Predeterminado:</label>
         <select id="defaultModel">
           <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Medium) — Recomendado</option>
