@@ -157,17 +157,30 @@ async function resolveInferenceEndpoint(modelName, defaultBase) {
 // ─── Dynamic Extension Action Icon ──────────────────────────────────────────
 function updateExtensionIcon(modelId) {
   const isClaude = typeof modelId === 'string' && modelId.toLowerCase().includes('claude');
-  const path = isClaude ? {
-    "16": "assets/claude-icon-16.png",
-    "32": "assets/claude-icon-32.png",
-    "48": "assets/claude-icon-48.png",
-    "128": "assets/claude-icon-128.png"
-  } : {
-    "16": "assets/icon-16.png",
-    "32": "assets/icon-32.png",
-    "48": "assets/icon-48.png",
-    "128": "assets/icon-128.png"
-  };
+  const isGpt = typeof modelId === 'string' && (modelId.toLowerCase().includes('gpt') || modelId.toLowerCase().includes('openai') || modelId.toLowerCase().includes('codex') || modelId.toLowerCase().includes('o3') || modelId.toLowerCase().includes('oss'));
+  let path;
+  if (isClaude) {
+    path = {
+      "16": "assets/claude-icon-16.png",
+      "32": "assets/claude-icon-32.png",
+      "48": "assets/claude-icon-48.png",
+      "128": "assets/claude-icon-128.png"
+    };
+  } else if (isGpt) {
+    path = {
+      "16": "assets/chatgpt-icon-16.png",
+      "32": "assets/chatgpt-icon-32.png",
+      "48": "assets/chatgpt-icon-48.png",
+      "128": "assets/chatgpt-icon-128.png"
+    };
+  } else {
+    path = {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    };
+  }
   try {
     if (chrome.action && chrome.action.setIcon) {
       chrome.action.setIcon({ path }, () => {

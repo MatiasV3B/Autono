@@ -127,7 +127,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #10a37f;
+  color: #ffffff;
 }
 
 .model-trigger-name {
@@ -318,10 +318,10 @@ body {
 }
 
 .picker-tab-btn[data-tab="openai"].active {
-  border-color: rgba(16, 185, 129, 0.45);
-  background: rgba(16, 185, 129, 0.14);
-  color: #34d399;
-  box-shadow: 0 1px 6px rgba(16, 185, 129, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  box-shadow: 0 1px 6px rgba(255, 255, 255, 0.2);
 }
 
 .picker-main {
