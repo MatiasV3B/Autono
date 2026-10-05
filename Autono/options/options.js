@@ -104,7 +104,7 @@
 
   async function saveSettings() {
     const settings = {
-      bridgeUrl: bridgeUrlInput.value.trim() || 'http://127.0.0.1:8000',
+      bridgeUrl: bridgeUrlInput.value.trim() || 'http://127.0.0.1:8765',
       selectedModel: defaultModelSelect.value,
       temperature: parseFloat(tempInput.value),
       maxSteps: parseInt(maxStepsInput.value, 10) || 20,

@@ -700,7 +700,7 @@ marked.setOptions({
     } else if (errString.includes('Failed to fetch') || errString.includes('NetworkError')) {
       code = 'NET';
       title = 'Connection Refused';
-      desc = 'Could not reach the local bridge server or external provider. Ensure AntigravityBridge is running locally at http://127.0.0.1:8000.';
+      desc = 'Could not reach the local bridge server or external provider. Ensure Model Bridge is running locally at http://127.0.0.1:8765.';
     }
 
     return `
@@ -1750,7 +1750,7 @@ marked.setOptions({
         e.stopPropagation();
         const prov = btn.getAttribute('data-provider');
         const targetMode = btn.getAttribute('data-mode');
-        const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+        const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
         let configPayload = {};
 
         if (prov === 'claude') {
@@ -3596,10 +3596,33 @@ marked.setOptions({
   const settingLocalMcpBridgeEnabled = document.getElementById('settingLocalMcpBridgeEnabled');
   const localMcpStatusBadge = document.getElementById('localMcpStatusBadge');
   const copyMcpConfigSnippetBtn = document.getElementById('copyMcpConfigSnippetBtn');
+  const copyMcpUrlBtn = document.getElementById('copyMcpUrlBtn');
   const mcpConfigSnippetCode = document.getElementById('mcpConfigSnippetCode');
+
+  function getActiveBridgeBaseUrl() {
+    return (localStorage.getItem('antigravity_bridge_url') || settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+  }
+
+  function refreshMcpSnippet() {
+    if (!mcpConfigSnippetCode) return;
+    const currentBridge = getActiveBridgeBaseUrl();
+    const snippet = {
+      "mcpServers": {
+        "autono-browser": {
+          "url": `${currentBridge}/mcp/sse`
+        }
+      }
+    };
+    mcpConfigSnippetCode.textContent = JSON.stringify(snippet, null, 2);
+  }
+
+  if (settingBridgeUrl) {
+    settingBridgeUrl.addEventListener('input', refreshMcpSnippet);
+  }
 
   async function updateLocalMcpStatusUI(isActive) {
     if (!localMcpStatusBadge) return;
+    refreshMcpSnippet();
     if (!isActive) {
       localMcpStatusBadge.className = 'local-mcp-status-pill inactive';
       localMcpStatusBadge.textContent = '● Desactivado';
@@ -3610,11 +3633,18 @@ marked.setOptions({
     localMcpStatusBadge.textContent = '● Activo (Verificando...)';
 
     try {
-      const currentBridge = (localStorage.getItem('antigravity_bridge_url') || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+      const currentBridge = getActiveBridgeBaseUrl();
       const resp = await fetch(`${currentBridge}/api/mcp/status`, { signal: AbortSignal.timeout(2000) });
       if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        let displayHostPort = '8765';
+        try {
+          const u = new URL(currentBridge);
+          displayHostPort = u.port || (u.protocol === 'https:' ? '443' : '80');
+        } catch (_) {}
+        if (data.port) displayHostPort = data.port;
         localMcpStatusBadge.className = 'local-mcp-status-pill active';
-        localMcpStatusBadge.textContent = '● Activo (127.0.0.1:8000)';
+        localMcpStatusBadge.textContent = `● Activo (:${displayHostPort})`;
       } else {
         localMcpStatusBadge.className = 'local-mcp-status-pill active';
         localMcpStatusBadge.textContent = '● Activo (Bridge listo)';
@@ -3642,9 +3672,30 @@ marked.setOptions({
     });
   }
 
+  if (copyMcpUrlBtn) {
+    copyMcpUrlBtn.addEventListener('click', async () => {
+      try {
+        const currentBridge = getActiveBridgeBaseUrl();
+        const urlToCopy = `${currentBridge}/mcp/sse`;
+        await navigator.clipboard.writeText(urlToCopy);
+        const originalText = copyMcpUrlBtn.textContent;
+        copyMcpUrlBtn.textContent = '✓ Copiado';
+        copyMcpUrlBtn.style.color = '#34d399';
+        showToast('URL MCP (SSE) copiada al portapapeles');
+        setTimeout(() => {
+          copyMcpUrlBtn.textContent = originalText;
+          copyMcpUrlBtn.style.color = '#93c5fd';
+        }, 2200);
+      } catch (err) {
+        showToast('Error al copiar URL MCP');
+      }
+    });
+  }
+
   if (copyMcpConfigSnippetBtn && mcpConfigSnippetCode) {
     copyMcpConfigSnippetBtn.addEventListener('click', async () => {
       try {
+        refreshMcpSnippet();
         const textToCopy = mcpConfigSnippetCode.innerText.trim();
         await navigator.clipboard.writeText(textToCopy);
         const originalText = copyMcpConfigSnippetBtn.textContent;
@@ -3983,8 +4034,10 @@ marked.setOptions({
   syncExternalProvidersToPicker();
 
   function applyLoadedSettings(s) {
-    if (!s) return;
-    if (settingBridgeUrl) settingBridgeUrl.value = s.bridgeUrl || 'http://127.0.0.1:8000';
+    if (settingBridgeUrl) {
+      settingBridgeUrl.value = s.bridgeUrl || 'http://127.0.0.1:8765';
+      refreshMcpSnippet();
+    }
     if (settingMaxSteps) settingMaxSteps.value = s.maxSteps || 30;
     if (settingTinyFishKey) {
       settingTinyFishKey.value = s.tinyFishApiKey || '';
@@ -4482,7 +4535,7 @@ marked.setOptions({
   const bridgeStatusBadge = document.getElementById('bridgeStatusBadge');
   if (testBridgeBtn && bridgeStatusBadge) {
     testBridgeBtn.addEventListener('click', async () => {
-      const url = settingBridgeUrl.value.trim() || 'http://127.0.0.1:8000';
+      const url = settingBridgeUrl.value.trim() || 'http://127.0.0.1:8765';
       bridgeStatusBadge.innerHTML = `<span class="status-dot" style="color:#eab308">●</span> Testing connection...`;
       try {
         const resp = await fetch(`${url}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) });
@@ -4555,7 +4608,7 @@ marked.setOptions({
     } catch (_) {}
 
     const newSettings = {
-      bridgeUrl: settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8000',
+      bridgeUrl: settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765',
       selectedModel: settingDefaultModel?.value || currentModel,
       maxSteps: parseInt(settingMaxSteps?.value, 10) || 30,
       tinyFishApiKey: settingTinyFishKey ? settingTinyFishKey.value.trim() : '',
@@ -4612,10 +4665,11 @@ marked.setOptions({
 
     localStorage.setItem('autono_local_mcp_bridge_enabled', String(newSettings.localMcpBridgeEnabled));
     updateLocalMcpStatusUI(newSettings.localMcpBridgeEnabled);
+    refreshMcpSnippet();
 
     sendPortMessage({ type: 'save_settings', settings: newSettings });
 
-    const bridgeUrl = (newSettings.bridgeUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+    const bridgeUrl = (newSettings.bridgeUrl || 'http://127.0.0.1:8765').replace(/\/+$/, '');
     fetch(`${bridgeUrl}/api/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4645,7 +4699,7 @@ marked.setOptions({
   // ─── Shadow Execution & Power Management Controller ────────────────────────
   async function applyKeepAwake(enable) {
     const shadowStatusPill = document.getElementById('shadowStatusPill');
-    const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+    const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
     try {
       if (enable) {
         if (chrome.power && chrome.power.requestKeepAwake) {
@@ -4697,7 +4751,7 @@ marked.setOptions({
     shadowSleepNowBtn.addEventListener('click', async () => {
       const ok = confirm('Put computer to Sleep now?');
       if (!ok) return;
-      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
       showShadowFeedback('Sending sleep command to system...');
       try {
         const resp = await fetch(`${bridgeUrl}/api/power/sleep`, { method: 'POST' });
@@ -4713,7 +4767,7 @@ marked.setOptions({
     shadowShutdownNowBtn.addEventListener('click', async () => {
       const ok = confirm('Start countdown to shut down the computer in 30 seconds? You can cancel at any time.');
       if (!ok) return;
-      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
       try {
         const resp = await fetch(`${bridgeUrl}/api/power/shutdown`, {
           method: 'POST',
@@ -4752,7 +4806,7 @@ marked.setOptions({
   if (shadowCancelShutdownBtn) {
     shadowCancelShutdownBtn.addEventListener('click', async () => {
       clearInterval(shutdownCountdownTimer);
-      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
       try {
         const resp = await fetch(`${bridgeUrl}/api/power/cancel-shutdown`, { method: 'POST' });
         const data = await resp.json();
@@ -4771,7 +4825,7 @@ marked.setOptions({
 
   if (shadowTestWakeBtn) {
     shadowTestWakeBtn.addEventListener('click', async () => {
-      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+      const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
       showShadowFeedback('Scheduling test RTC wake timer...');
       try {
         const resp = await fetch(`${bridgeUrl}/api/power/schedule-wake`, {
@@ -5071,7 +5125,7 @@ You are a world-class principal software engineer.
 
     const savedName = localStorage.getItem('antigravity_user_name') || '';
     const savedNick = localStorage.getItem('antigravity_user_nick') || '';
-    const savedBridge = localStorage.getItem('antigravity_bridge_url') || (settingBridgeUrl ? settingBridgeUrl.value : 'http://127.0.0.1:8000');
+    const savedBridge = localStorage.getItem('antigravity_bridge_url') || (settingBridgeUrl ? settingBridgeUrl.value : 'http://127.0.0.1:8765');
     if (onboardNameInput && savedName) onboardNameInput.value = savedName;
     if (onboardNicknameInput && savedNick) onboardNicknameInput.value = savedNick;
     if (document.getElementById('onboardBridgeUrl')) document.getElementById('onboardBridgeUrl').value = savedBridge;
@@ -5146,7 +5200,7 @@ You are a world-class principal software engineer.
   if (onboardTestBridgeBtn) {
     onboardTestBridgeBtn.addEventListener('click', async () => {
       const bridgeUrlInput = document.getElementById('onboardBridgeUrl');
-      const testUrl = (bridgeUrlInput?.value || 'http://127.0.0.1:8000').trim();
+      const testUrl = (bridgeUrlInput?.value || 'http://127.0.0.1:8765').trim();
       if (onboardBridgeStatus) {
         onboardBridgeStatus.innerHTML = '<span class="status-dot" style="color:#eab308">●</span> Testing connection...';
       }
@@ -5162,9 +5216,9 @@ You are a world-class principal software engineer.
         }
       } catch (_) {
         if (onboardBridgeStatus) {
-          onboardBridgeStatus.innerHTML = '<span class="status-dot" style="color:#ef4444">●</span> Bridge unreachable (check port 8000)';
+          onboardBridgeStatus.innerHTML = '<span class="status-dot" style="color:#ef4444">●</span> Bridge unreachable (check port 8765)';
         }
-        showToast('Could not reach bridge on port 8000');
+        showToast('Could not reach bridge on port 8765');
       }
     });
   }
@@ -5174,7 +5228,7 @@ You are a world-class principal software engineer.
     onboardFinishBtn.addEventListener('click', () => {
       const name = onboardNameInput?.value?.trim() || '';
       const nickname = onboardNicknameInput?.value?.trim() || name || 'User';
-      const bridgeUrl = document.getElementById('onboardBridgeUrl')?.value?.trim() || 'http://127.0.0.1:8000';
+      const bridgeUrl = document.getElementById('onboardBridgeUrl')?.value?.trim() || 'http://127.0.0.1:8765';
       const defaultModel = document.getElementById('onboardDefaultModel')?.value || 'gemini-3.8-flash-medium';
       const tinyKey = document.getElementById('onboardTinyFishKey')?.value?.trim() || '';
 
@@ -5570,7 +5624,7 @@ You are a world-class principal software engineer.
     btwMessagesContainer.scrollTop = btwMessagesContainer.scrollHeight;
 
     try {
-      const bridgeUrl = (settingBridgeUrl?.value || 'http://127.0.0.1:8000').trim().replace(/\/+$/, '');
+      const bridgeUrl = (settingBridgeUrl?.value || 'http://127.0.0.1:8765').trim().replace(/\/+$/, '');
       const resp = await fetch(`${bridgeUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
@@ -6281,7 +6335,7 @@ You are a world-class principal software engineer.
     consoleEl.classList.remove('hidden');
     consoleEl.classList.remove('error');
     consoleEl.textContent = `⏳ Running ${lang} via AntigravityBridge...`;
-    const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8000';
+    const bridgeUrl = settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765';
     try {
       const resp = await fetch(`${bridgeUrl}/api/code/execute`, {
         method: 'POST',
@@ -7418,7 +7472,7 @@ You are a world-class principal software engineer.
     showToast('✦ Enhancing prompt for maximum performance...');
 
     try {
-      const baseUrl = (settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+      const baseUrl = (settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
       const targetModel = currentModel || 'gemini-3.8-flash-medium';
 
       const promptOptimizationInstruction = `You are a world-class prompt engineering expert. 

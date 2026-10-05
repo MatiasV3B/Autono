@@ -3,7 +3,7 @@
  * Manages AntigravityBridge connection, Chat & Cowork execution, background tasks, and session persistence.
  */
 
-const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8000';
+const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_MODEL = 'gemini-3.8-flash-medium';
 
 const PRELOADED_MODELS = [
