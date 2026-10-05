@@ -160,7 +160,35 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
     url: `${cleanBase}/${provider}/v1/chat/completions`,
     headers,
     model: targetModel,
+    provider,
+    cleanBase,
   };
+}
+
+async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
+  const { url, headers, provider, cleanBase } = endpointInfo;
+  let res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(bodyPayload),
+    signal,
+  });
+
+  // Seamless fallback to root /v1/chat/completions if the running bridge instance does not yet have /{provider}/ routes
+  if (!res.ok && res.status === 404 && provider && cleanBase && url.includes(`/${provider}/`)) {
+    const fallbackUrl = `${cleanBase}/v1/chat/completions`;
+    const fallbackRes = await fetch(fallbackUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bodyPayload),
+      signal,
+    }).catch(() => null);
+    if (fallbackRes && (fallbackRes.ok || fallbackRes.status !== 404)) {
+      res = fallbackRes;
+    }
+  }
+
+  return res;
 }
 
 // ─── Dynamic Extension Action Icon ──────────────────────────────────────────
@@ -651,8 +679,12 @@ async function saveSettings(settings) {
 }
 
 async function getSessions() {
-  const data = await chrome.storage.local.get('antigravity_sessions');
-  return data.antigravity_sessions || [];
+  try {
+    const data = await chrome.storage.local.get('antigravity_sessions');
+    return Array.isArray(data?.antigravity_sessions) ? data.antigravity_sessions : [];
+  } catch {
+    return [];
+  }
 }
 
 async function saveSessions(sessions) {
@@ -1190,7 +1222,8 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
     }
 
     const targetModel = modelName || settings.selectedModel || DEFAULT_MODEL;
-    const { url: endpointUrl, headers: endpointHeaders, model: resolvedModel } = await resolveInferenceEndpoint(targetModel, base, explicitProvider);
+    const endpointInfo = await resolveInferenceEndpoint(targetModel, base, explicitProvider);
+    const resolvedModel = endpointInfo.model;
 
     const effortMap = {
       'fast': 0,
@@ -1220,12 +1253,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       thinking_budget: thinkingBudget,
     };
 
-    const response = await fetch(endpointUrl, {
-      method: 'POST',
-      headers: endpointHeaders,
-      body: JSON.stringify(payload),
-      signal: abortController.signal,
-    });
+    const response = await fetchInferenceWithFallback(endpointInfo, payload, abortController.signal);
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
@@ -1462,21 +1490,16 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
     let planIntro = '';
     let planData = null;
     try {
-      const { url: planUrl, headers: planHeaders, model: resolvedPlanModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
-      const planRes = await fetch(planUrl, {
-        method: 'POST',
-        headers: planHeaders,
-        body: JSON.stringify({
-          model: resolvedPlanModel,
-          messages: [{ role: 'user', content: plannerPrompt }],
-          temperature: 0.1,
-          stream: false,
-          max_tokens: settings.maxOutputTokens || 65536,
-          max_output_tokens: settings.maxOutputTokens || 65536,
-          ...getProviderModes(resolvedPlanModel, settings),
-        }),
-        signal: abortController.signal,
-      });
+      const planEndpoint = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
+      const planRes = await fetchInferenceWithFallback(planEndpoint, {
+        model: planEndpoint.model,
+        messages: [{ role: 'user', content: plannerPrompt }],
+        temperature: 0.1,
+        stream: false,
+        max_tokens: settings.maxOutputTokens || 65536,
+        max_output_tokens: settings.maxOutputTokens || 65536,
+        ...getProviderModes(planEndpoint.model, settings),
+      }, abortController.signal);
 
       if (planRes.ok) {
         const planJson = await planRes.json();
@@ -1631,21 +1654,16 @@ You MUST reply ONLY with a JSON block with this strict format:
   "description": "User-friendly description in English of what you are doing"
 }`;
 
-      const { url: stepUrl, headers: stepHeaders, model: resolvedStepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
-      const res = await fetch(stepUrl, {
-        method: 'POST',
-        headers: stepHeaders,
-        body: JSON.stringify({
-          model: resolvedStepModel,
-          messages: [{ role: 'user', content: coworkerPrompt }],
-          temperature: 0.1,
-          stream: false,
-          max_tokens: settings.maxOutputTokens || 65536,
-          max_output_tokens: settings.maxOutputTokens || 65536,
-          ...getProviderModes(resolvedStepModel, settings),
-        }),
-        signal: abortController.signal,
-      });
+      const stepEndpoint = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
+      const res = await fetchInferenceWithFallback(stepEndpoint, {
+        model: stepEndpoint.model,
+        messages: [{ role: 'user', content: coworkerPrompt }],
+        temperature: 0.1,
+        stream: false,
+        max_tokens: settings.maxOutputTokens || 65536,
+        max_output_tokens: settings.maxOutputTokens || 65536,
+        ...getProviderModes(stepEndpoint.model, settings),
+      }, abortController.signal);
 
       if (!res.ok) throw new Error(`Antigravity Bridge failure on step ${currentStep}`);
 
@@ -1827,21 +1845,16 @@ Formatting instructions:
 
     let finalReportMarkdown = '';
     try {
-      const { url: repUrl, headers: repHeaders, model: resolvedRepModel } = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
-      const repRes = await fetch(repUrl, {
-        method: 'POST',
-        headers: repHeaders,
-        body: JSON.stringify({
-          model: resolvedRepModel,
-          messages: [{ role: 'user', content: reportPrompt }],
-          temperature: 0.2,
-          stream: false,
-          max_tokens: settings.maxOutputTokens || 65536,
-          max_output_tokens: settings.maxOutputTokens || 65536,
-          ...getProviderModes(resolvedRepModel, settings),
-        }),
-        signal: abortController.signal,
-      });
+      const repEndpoint = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
+      const repRes = await fetchInferenceWithFallback(repEndpoint, {
+        model: repEndpoint.model,
+        messages: [{ role: 'user', content: reportPrompt }],
+        temperature: 0.2,
+        stream: false,
+        max_tokens: settings.maxOutputTokens || 65536,
+        max_output_tokens: settings.maxOutputTokens || 65536,
+        ...getProviderModes(repEndpoint.model, settings),
+      }, abortController.signal);
 
       if (repRes.ok) {
         const repJson = await repRes.json();
@@ -2660,24 +2673,31 @@ function cleanPromptForHistory(text) {
 }
 
 async function appendMessageToSession(sessionId, message) {
-  const sessions = await getSessions();
-  let session = sessions.find(s => s.id === sessionId);
-  if (!session) {
-    const cleanContent = cleanPromptForHistory(message.content || '');
-    session = {
-      id: sessionId,
-      title: cleanContent ? (cleanContent.replace(/^\/\S+\s*/, '').slice(0, 35) + '...') : 'New Chat',
-      folder: 'General',
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    sessions.unshift(session);
+  try {
+    if (!sessionId) return;
+    let sessions = await getSessions();
+    if (!Array.isArray(sessions)) sessions = [];
+    let session = sessions.find(s => s && s.id === sessionId);
+    if (!session) {
+      const cleanContent = cleanPromptForHistory(message?.content || '');
+      session = {
+        id: sessionId,
+        title: cleanContent ? (cleanContent.replace(/^\/\S+\s*/, '').slice(0, 35) + '...') : 'New Chat',
+        folder: 'General',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      sessions.unshift(session);
+    }
+    if (!session.folder) session.folder = 'General';
+    if (!Array.isArray(session.messages)) session.messages = [];
+    session.messages.push(message);
+    session.updatedAt = Date.now();
+    await saveSessions(sessions);
+  } catch (err) {
+    console.warn('Error appending message to session:', err);
   }
-  if (!session.folder) session.folder = 'General';
-  session.messages.push(message);
-  session.updatedAt = Date.now();
-  await saveSessions(sessions);
 }
 
 // ─── Port Connection Listener (Side Panel communication) ───────────────────
@@ -2747,7 +2767,9 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               hasScreenshot: !!msg.includeScreenshot,
             });
-            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort, msg.provider);
+            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort, msg.provider).catch((err) => {
+              console.warn('Unhandled chat stream error:', err);
+            });
             break;
           }
 
@@ -2768,7 +2790,9 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               mode: 'cowork',
             });
-            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort, msg.provider);
+            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort, msg.provider).catch((err) => {
+              console.warn('Unhandled cowork task error:', err);
+            });
             break;
           }
 
