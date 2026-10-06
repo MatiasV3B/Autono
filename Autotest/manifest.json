@@ -1,0 +1,77 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Test",
+  "version": "1.0.0",
+  "description": "Auto Test - Autonomous AI browser agent and navigation copilot with Chat & Cowork modes, connected to local Antigravity Bridge (Gemini 3.8, Claude) and direct cloud APIs.",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_icon": "assets/icon-32.png",
+    "default_title": "Open Auto Test"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "windows": "Alt+Shift+C",
+        "mac": "Command+Shift+C"
+      },
+      "description": "Open Auto Test"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "side-panel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "<all_urls>"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "tabGroups",
+    "unlimitedStorage",
+    "webNavigation",
+    "notifications",
+    "sidePanel",
+    "power",
+    "alarms",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*"
+  ],
+  "options_page": "options/options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*",
+        "domExtractor.js",
+        "buildDomTree.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

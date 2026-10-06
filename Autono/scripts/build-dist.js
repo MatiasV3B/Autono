@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
-const agyDist = path.resolve(rootDir, '../dist');
+const agyDist = path.resolve(rootDir, '../dist/Autono');
 
 function copyFolder(src, dest) {
   if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
@@ -24,6 +24,6 @@ function copyFolder(src, dest) {
 
 console.log('Building dist packages...');
 copyFolder(rootDir, agyDist);
-console.log('✓ Antigravity Extension/dist updated');
+console.log('✓ Autono dist updated at dist/Autono');
 
 console.log('Build complete!');

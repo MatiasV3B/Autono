@@ -24,8 +24,7 @@ Bienvenido a **Antigravity Agent**, la extensión de Chrome de última generaci�
   - `Gemini 3.8 Flash (Medium)`
   - `Gemini 3.7 Flash (High)`
   - `Gemini 3.1 Pro (High)`
-  - `Claude Sonnet 4.6 (Thinking)`
-  - `Claude Opus 4.6 (Thinking)`
+  - `Claude Sonnet 5.5` / `Claude Opus 5.5`
   - `GPT-OSS 120B (Medium)`
 
 ### 3. Tema y Animaciones Oficiales Antigravity

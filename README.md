@@ -26,7 +26,7 @@
 2. **Anthropic Claude**:
    - **Local Terminal**: Terminal-driven local execution.
    - **Claude API**: Direct connection using your Anthropic API key (never via Gemini API).
-   - *Models*: Claude Sonnet 5.5, Claude Opus 5.5, Claude Fable 5.1, Claude Haiku 4.5, Claude Sonnet 4.6, Claude Opus 4.6.
+   - *Models*: Claude Sonnet 5.5, Claude Opus 5.5, Claude Fable 5.1, Claude Haiku 4.5.
 3. **OpenAI & Codex**:
    - **Local Terminal**: Local CLI environment.
    - **ChatGPT API**: Direct connection using your OpenAI API key.
@@ -49,7 +49,7 @@ flowchart TD
     end
 
     subgraph LocalMachine ["Local Host Machine"]
-        Bridge["Model Bridge\n(FastAPI Server @ http://127.0.0.1:8000)"]
+        Bridge["Model Bridge\n(FastAPI Server @ http://127.0.0.1:8765)"]
     end
 
     subgraph Providers ["AI Providers & Dual Execution Engines"]
@@ -81,31 +81,18 @@ Follow these steps to set up your environment:
 
 ### 1. Prerequisites
 - **Google Chrome** version 120 or higher (or any Chromium browser with Manifest V3 Side Panel API support).
-- **Python 3.10+** (to run the local Model Bridge server).
 - **Git** installed on your system.
 
-### 2. Start the Local Model Bridge Server
-Autono communicates with the local [**Model Bridge**](https://github.com/MatiasV3B/ModelBridge) server running on `http://127.0.0.1:8000`.
+### 2. Install & Start the Local Model Bridge
+Autono communicates with the local [**Model Bridge**](https://github.com/MatiasV3B/ModelBridge) server running on `http://127.0.0.1:8765`. **No Python installation is needed**: the installer uses [uv](https://docs.astral.sh/uv/) to create an isolated environment with its own Python.
 
-1. Clone and navigate to the official [Model Bridge](https://github.com/MatiasV3B/ModelBridge) repository:
-   ```bash
-   git clone https://github.com/MatiasV3B/ModelBridge.git
-   cd ModelBridge
-   ```
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Start the server:
-   - On Windows: Run `Iniciar-AntigravityBridge.bat` or:
-     ```powershell
-     python main.py
-     ```
-   - On Linux/macOS (Headless):
-     ```bash
-     python main.py --headless --host 127.0.0.1 --port 8000
-     ```
-4. Verify the server is running by opening `http://127.0.0.1:8000/health` in your browser. You should receive a JSON status response (`{"status": "ok"}`).
+```powershell
+irm https://raw.githubusercontent.com/MatiasV3B/ModelBridge/main/install.ps1 | iex
+```
+
+This installs the Bridge into `%LOCALAPPDATA%\AntigravityBridge`, creates the Desktop / Start Menu shortcuts and starts it. (Prefer cloning? `git clone https://github.com/MatiasV3B/ModelBridge.git`, then double-click `Instalador-AntigravityBridge.bat`.)
+
+Verify it is running by opening `http://127.0.0.1:8765/health` in your browser: you should receive a JSON status response.
 
 ### 3. Install the Extension in Chrome
 1. Clone this repository (if you haven't already):
@@ -116,8 +103,10 @@ Autono communicates with the local [**Model Bridge**](https://github.com/MatiasV
 2. Open Chrome and go to `chrome://extensions` in the address bar.
 3. Turn on the **Developer mode** switch in the top-right corner.
 4. Click the **Load unpacked** button.
-5. Select the **`Autono`** directory located inside the repository.
-6. Pin **Autono** to your Chrome toolbar by clicking the puzzle icon.
+5. Select either extension directory according to your preference:
+   - **`Autono`**: Standard release version with full agent capabilities.
+   - **`Autotest`**: Testing & experimental branch with synchronized engine improvements.
+6. Pin your chosen extension to your Chrome toolbar by clicking the puzzle icon.
 
 ---
 
@@ -181,12 +170,7 @@ node scripts/build-dist.js
 Then, follow the [How to Reload](#-how-to-reload) steps in Chrome.
 
 ### 2. Update the Local Bridge Backend
-```bash
-cd ModelBridge
-git pull origin main
-pip install -r requirements.txt --upgrade
-```
-Restart the bridge process (`Iniciar-AntigravityBridge.bat` or `python main.py`).
+Double-click `Actualizar-AntigravityBridge.bat` in the Bridge folder (or run `./update.ps1`). It stops the Bridge, pulls the latest code, runs `uv sync` (only installs what changed) and restarts it.
 
 ---
 
@@ -207,7 +191,7 @@ Restart the bridge process (`Iniciar-AntigravityBridge.bat` or `python main.py`)
 
 ```text
 autono/
-├── Autono/                     # Chrome Extension source (Manifest V3)
+├── Autono/                     # Chrome Extension source (Autono Production Edition)
 │   ├── assets/                 # High-resolution logos & icons (Autono, Antigravity, Claude)
 │   ├── components/             # Reusable UI component modules
 │   ├── content/                # Content script & in-page working overlay
@@ -215,9 +199,19 @@ autono/
 │   ├── side-panel/             # Side panel controller, styles, and template
 │   ├── scripts/                # Distribution & packaging build scripts
 │   ├── background.js           # MV3 Service Worker & streaming orchestrator
-│   ├── manifest.json           # Chrome extension manifest
+│   ├── manifest.json           # Chrome extension manifest (Autono)
 │   └── package.json            # Extension metadata & dependencies
-├── dist/                       # Packaged distribution build
+├── Autotest/                   # Chrome Extension source (Autotest Testing Edition)
+│   ├── assets/                 # Logos & icons
+│   ├── components/             # Reusable UI component modules
+│   ├── content/                # Content script & in-page working overlay
+│   ├── options/                # Extension options & preferences page
+│   ├── side-panel/             # Side panel controller, styles, and template
+│   ├── scripts/                # Distribution & packaging build scripts
+│   ├── background.js           # MV3 Service Worker & streaming orchestrator
+│   ├── manifest.json           # Chrome extension manifest (Auto Test)
+│   └── package.json            # Extension metadata & dependencies
+├── dist/                       # Packaged distribution builds (dist/Autono & dist/Autotest)
 ├── .github/                    # GitHub templates & workflows
 │   ├── ISSUE_TEMPLATE/         # Bug report & feature request templates
 │   └── pull_request_template.md
