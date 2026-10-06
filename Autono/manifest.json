@@ -16,9 +16,9 @@
   "commands": {
     "_execute_action": {
       "suggested_key": {
-        "default": "Ctrl+Alt+A",
-        "windows": "Ctrl+Alt+A",
-        "mac": "Ctrl+Alt+A"
+        "default": "Alt+Shift+A",
+        "windows": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
       },
       "description": "Open Autono"
     }

@@ -3712,7 +3712,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// ─── Chrome Commands Listener (Ctrl+Alt+C) ──────────────────────────────────
+// ─── Chrome Commands Listener (Alt+Shift+A) ──────────────────────────────────
 if (chrome.commands && chrome.commands.onCommand) {
   chrome.commands.onCommand.addListener(async (command) => {
     if (command === '_execute_action' || command === 'open_side_panel') {
