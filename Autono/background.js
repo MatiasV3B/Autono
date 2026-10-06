@@ -7,23 +7,19 @@ const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_MODEL = 'gemini-3.8-flash-medium';
 
 const PRELOADED_MODELS = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Direct API)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Direct API)' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Direct API)' },
   { id: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
   { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
   { id: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
   { id: 'gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash (Medium)' },
+  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
+  { id: 'gemini-3.7-flash-low', name: 'Gemini 3.7 Flash (Low)' },
+  { id: 'gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash (Medium)' },
+  { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)' },
+  { id: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' },
   { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
-  { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet (Direct API)' },
-  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Direct API)' },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Direct API)' },
+  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
   { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
-  { id: 'gpt-4o', name: 'GPT-4o (Direct API)' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Direct API)' },
-  { id: 'o3-mini', name: 'o3-mini (Direct API)' },
-  { id: 'gpt-6-luna', name: 'GPT-6 Luna (Codex)' },
   { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
 ];
 
@@ -58,11 +54,11 @@ async function getSettings() {
     selectedModel: s.selectedModel || DEFAULT_MODEL,
     localMcpBridgeEnabled: s.localMcpBridgeEnabled !== undefined ? s.localMcpBridgeEnabled : (data.autono_local_mcp_bridge_enabled !== undefined ? Boolean(data.autono_local_mcp_bridge_enabled) : false),
     localMcpUrl: s.localMcpUrl || data.autono_local_mcp_url || `${s.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`,
-    antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'api',
+    antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
     geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
-    claudeMode: s.claudeMode || data.antigravity_claude_mode || 'api',
+    claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
     anthropicApiKey: s.anthropicApiKey || data.antigravity_anthropic_api_key || '',
-    openaiMode: s.openaiMode || data.antigravity_openai_mode || 'api',
+    openaiMode: s.openaiMode || data.antigravity_openai_mode || 'desktop',
     openaiApiKey: s.openaiApiKey || data.antigravity_openai_api_key || '',
     temperature: s.temperature !== undefined ? s.temperature : 0.2,
     autoCaptureScreenshot: !!s.autoCaptureScreenshot,
@@ -115,29 +111,17 @@ const CLOUD_ENDPOINTS = {
 // Model mapping for Direct Google Gemini API
 function mapToGeminiApiModel(modelName) {
   const m = (modelName || '').toLowerCase();
-  if (m.includes('pro')) return 'gemini-2.5-pro';
-  if (m.includes('3.8') || m.includes('3.7') || m.includes('3.6') || m.includes('flash')) return 'gemini-2.5-flash';
-  if (m.startsWith('gemini-')) return modelName;
-  return 'gemini-2.5-flash';
+  return modelName || 'gemini-1.5-flash';
 }
 
 // Model mapping for Direct Anthropic Claude API
 function mapToAnthropicApiModel(modelName) {
-  const m = (modelName || '').toLowerCase();
-  if (m.includes('opus')) return 'claude-3-opus-20240229';
-  if (m.includes('haiku')) return 'claude-3-5-haiku-20241022';
-  if (m.includes('sonnet') || m.includes('fable')) return 'claude-3-7-sonnet-20250219';
-  if (m.startsWith('claude-3')) return modelName;
-  return 'claude-3-7-sonnet-20250219';
+  return modelName || 'claude-3-5-sonnet-20241022';
 }
 
 // Model mapping for Direct OpenAI API
 function mapToOpenAiApiModel(modelName) {
-  const m = (modelName || '').toLowerCase();
-  if (m.includes('mini')) return 'gpt-4o-mini';
-  if (m.includes('o3') || m.includes('o1')) return 'o3-mini';
-  if (m.startsWith('gpt-4') || m.startsWith('o1') || m.startsWith('o3')) return modelName;
-  return 'gpt-4o';
+  return modelName || 'gpt-4o';
 }
 
 // Convert standard OpenAI chat payload to Anthropic Messages API format
@@ -313,10 +297,10 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
   // Determine if direct cloud API should be used:
   // - Mode is explicitly 'api', OR
   // - LocalBridge is offline/unreachable, OR
-  const provMode = provider === 'antigravity' ? (settings.antigravityMode || 'api') : (provider === 'claude' ? (settings.claudeMode || 'api') : (settings.openaiMode || 'api'));
+  const provMode = provider === 'antigravity' ? (settings.antigravityMode || 'desktop') : (provider === 'claude' ? (settings.claudeMode || 'desktop') : (settings.openaiMode || 'desktop'));
   const provKey = provider === 'antigravity' ? settings.geminiApiKey?.trim() : (provider === 'claude' ? settings.anthropicApiKey?.trim() : settings.openaiApiKey?.trim());
 
-  const useDirectApi = provMode === 'api' || (!bridgeOnline && provKey) || (provKey && provMode !== 'cli');
+  const useDirectApi = provMode === 'api';
 
   if (useDirectApi) {
     if (provider === 'antigravity') {
@@ -453,12 +437,38 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
   }
 
   // Standard OpenAI-compatible format (Direct Gemini, Direct OpenAI, Custom Providers, or Bridge)
+  let cleanPayload = bodyPayload;
+  if (isDirectCloud) {
+    // Cloud APIs (like Google Gemini) strictly reject non-standard fields:
+    // e.g. "Unknown name 'max_output_tokens'", "Unknown name 'antigravity_mode'", etc.
+    cleanPayload = {
+      model: endpointInfo.model,
+      messages: bodyPayload.messages || [],
+      temperature: bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2,
+      stream: Boolean(bodyPayload.stream),
+    };
+    if (bodyPayload.max_tokens) {
+      cleanPayload.max_tokens = Math.min(bodyPayload.max_tokens, 8192);
+    }
+  }
+
   let res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(bodyPayload),
+    body: JSON.stringify(cleanPayload),
     signal,
   });
+
+  if (!res.ok && isDirectCloud) {
+    const errText = await res.text().catch(() => '');
+    let errMsg = `API Error ${res.status}`;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.error?.message) errMsg = errJson.error.message;
+      else if (Array.isArray(errJson) && errJson[0]?.error?.message) errMsg = errJson[0].error.message;
+    } catch {}
+    throw new Error(errMsg);
+  }
 
   // Seamless fallback to root /v1/chat/completions if local bridge lacks /{provider}/ prefix
   if (!res.ok && res.status === 404 && !isDirectCloud && provider && cleanBase && url.includes(`/${provider}/`)) {

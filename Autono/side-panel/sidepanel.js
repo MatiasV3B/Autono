@@ -188,39 +188,6 @@ marked.setOptions({
       </svg>`,
       models: [
         {
-          id: 'gemini-2.5-flash',
-          name: 'Gemini 2.5 Flash',
-          desc: 'High-speed official Google Gemini model for rapid web and text analysis.',
-          contextWindow: '1.0M tokens',
-          metrics: { intelligence: 8, speed: 9, context: 10, efficiency: 8 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'gemini',
-        },
-        {
-          id: 'gemini-2.5-pro',
-          name: 'Gemini 2.5 Pro',
-          desc: 'Supreme analytical depth and frontier reasoning from Google AI Studio.',
-          contextWindow: '2.0M tokens',
-          metrics: { intelligence: 9, speed: 4, context: 10, efficiency: 7 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'high'],
-          defaultThinking: 'high',
-          usageGroup: 'gemini',
-        },
-        {
-          id: 'gemini-2.0-flash',
-          name: 'Gemini 2.0 Flash',
-          desc: 'Fast, lightweight multimodal model for instant web interactions.',
-          contextWindow: '1.0M tokens',
-          metrics: { intelligence: 8, speed: 9, context: 10, efficiency: 8 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'gemini',
-        },
-        {
           id: 'gemini-3.8-flash',
           name: 'Gemini 3.8 Flash',
           desc: 'Agile navigation, multimodal vision and rapid web page analysis.',
@@ -282,39 +249,6 @@ marked.setOptions({
       name: 'Claude',
       iconSvg: `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="Claude">`,
       models: [
-        {
-          id: 'claude-3-7-sonnet-20250219',
-          name: 'Claude 3.7 Sonnet',
-          desc: 'Anthropic hybrid reasoning model with state-of-the-art coding and extended thinking.',
-          contextWindow: '200K tokens',
-          metrics: { intelligence: 9, speed: 8, context: 8, efficiency: 7 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
-          defaultThinking: 'high',
-          usageGroup: 'claude_gpt',
-        },
-        {
-          id: 'claude-3-5-sonnet-20241022',
-          name: 'Claude 3.5 Sonnet',
-          desc: 'Frontier code generation, deep comprehension and multi-turn workflows.',
-          contextWindow: '200K tokens',
-          metrics: { intelligence: 8, speed: 8, context: 8, efficiency: 7 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'claude_gpt',
-        },
-        {
-          id: 'claude-3-5-haiku-20241022',
-          name: 'Claude 3.5 Haiku',
-          desc: 'Instant-speed lightweight response for browser actions and quick chats.',
-          contextWindow: '200K tokens',
-          metrics: { intelligence: 7, speed: 9, context: 7, efficiency: 9 },
-          caps: ['reasoning', 'image'],
-          thinking: ['fast', 'thinking'],
-          defaultThinking: 'fast',
-          usageGroup: 'claude_gpt',
-        },
         {
           id: 'claude-sonnet-5-5',
           name: 'Claude Sonnet 5.5',
@@ -390,39 +324,6 @@ marked.setOptions({
         <path fill="#ffffff" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1683a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4947zm-9.66-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1402-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.02 1.1683a.0757.0757 0 0 1-.071 0l-4.8303-2.7866A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1636a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
       </svg>`,
       models: [
-        {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          desc: 'Omni-model flagship for high-intelligence multimodal tasks and vision.',
-          contextWindow: '128K tokens',
-          metrics: { intelligence: 9, speed: 8, context: 7, efficiency: 7 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'claude_gpt',
-        },
-        {
-          id: 'gpt-4o-mini',
-          name: 'GPT-4o Mini',
-          desc: 'Fast, cost-effective vision and text model for nimble navigation.',
-          contextWindow: '128K tokens',
-          metrics: { intelligence: 7, speed: 9, context: 7, efficiency: 9 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'claude_gpt',
-        },
-        {
-          id: 'o3-mini',
-          name: 'o3-mini',
-          desc: 'Specialized STEM reasoning, competitive math and code generation.',
-          contextWindow: '200K tokens',
-          metrics: { intelligence: 9, speed: 7, context: 8, efficiency: 8 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'high',
-          usageGroup: 'claude_gpt',
-        },
         {
           id: 'gpt-6-astra',
           name: 'GPT-6 Astra',
@@ -2198,95 +2099,24 @@ marked.setOptions({
     });
   }
 
-  // Reload Models from Cloud APIs & Bridge Button
+  // Reload Models from Bridge Button
   const refreshModelsBtn = document.getElementById('refreshModelsBtn');
   if (refreshModelsBtn) {
     refreshModelsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       refreshModelsBtn.classList.add('spinning');
       const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-      let loadedFromCloud = false;
-
-      // 1. Fetch Google Gemini models directly via Google AI Studio API if API Key is configured
-      const geminiKey = (settingGeminiApiKey?.value || currentGeminiApiKey || '').trim();
-      if (geminiKey) {
-        try {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, {
-            signal: AbortSignal.timeout(6000),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const models = data.models || [];
-            models.forEach((m) => {
-              const name = (m.name || '').replace('models/', '');
-              if (!name) return;
-              if (name.includes('gemini')) {
-                const exists = PROVIDER_DATA.gemini.models.some(x => x.id === name);
-                if (!exists) {
-                  PROVIDER_DATA.gemini.models.push({
-                    id: name,
-                    name: m.displayName || name,
-                    desc: m.description || 'Google Gemini Direct Cloud Model',
-                    contextWindow: `${Math.round((m.inputTokenLimit || 1000000) / 1000)}K tokens`,
-                    metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 7 },
-                    caps: ['reasoning', 'image'],
-                    thinking: ['low', 'medium', 'high'],
-                    defaultThinking: 'medium',
-                    usageGroup: 'gemini',
-                  });
-                }
-              }
-            });
-            loadedFromCloud = true;
-          }
-        } catch (geminiErr) {
-          console.log('Direct Gemini models fetch note:', geminiErr);
-        }
-      }
-
-      // 2. Fetch OpenAI models directly if OpenAI API Key is configured
-      const openaiKey = (settingOpenaiApiKey?.value || currentOpenaiApiKey || '').trim();
-      if (openaiKey) {
-        try {
-          const res = await fetch('https://api.openai.com/v1/models', {
-            headers: { Authorization: `Bearer ${openaiKey}` },
-            signal: AbortSignal.timeout(6000),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const list = data.data || [];
-            list.filter(m => m.id && (m.id.startsWith('gpt-') || m.id.startsWith('o1') || m.id.startsWith('o3'))).forEach((m) => {
-              const exists = PROVIDER_DATA.chatgpt.models.some(x => x.id === m.id);
-              if (!exists) {
-                PROVIDER_DATA.chatgpt.models.push({
-                  id: m.id,
-                  name: m.id.toUpperCase(),
-                  desc: 'OpenAI Direct Cloud Model',
-                  contextWindow: '128K tokens',
-                  metrics: { intelligence: 8, speed: 8, context: 8, efficiency: 7 },
-                  caps: ['reasoning', 'image'],
-                  thinking: ['low', 'medium', 'high'],
-                  defaultThinking: 'medium',
-                  usageGroup: 'claude_gpt',
-                });
-              }
-            });
-            loadedFromCloud = true;
-          }
-        } catch (openaiErr) {
-          console.log('Direct OpenAI models fetch note:', openaiErr);
-        }
-      }
-
-      // 3. Also check Local Bridge if running
-      let bridgeSucceeded = false;
       try {
-        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(4000) }).catch(() => null);
-        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(4000) });
+        // Trigger model refresh on Bridge asynchronously
+        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(12000) }).catch(() => null);
+
+        // Fetch fresh model catalog from Bridge
+        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(12000) });
         if (res.ok) {
           const data = await res.json();
           const fetchedList = data.data || data.models || [];
           if (Array.isArray(fetchedList) && fetchedList.length > 0) {
+            let addedCount = 0;
             fetchedList.forEach((m) => {
               const mId = m.id || m.model || m;
               if (typeof mId !== 'string') return;
@@ -2306,28 +2136,25 @@ marked.setOptions({
                   defaultThinking: 'medium',
                   usageGroup: isClaude || isOpenAI ? 'claude_gpt' : 'gemini',
                 });
+                addedCount++;
               }
             });
-            bridgeSucceeded = true;
+            showToast('✅ Models refreshed from CLIs & Bridge');
+          } else {
+            showToast('✅ Models up to date');
           }
+          renderModelPickerRows(modelSearchInput.value);
+        } else {
+          showToast(`⚠️ Bridge returned status ${res.status}`);
         }
-      } catch (bridgeErr) {
-        // Bridge is offline; perfectly normal when using Direct APIs
+      } catch (err) {
+        console.warn('Refresh models error:', err);
+        const isTimeout = err?.name === 'TimeoutError' || String(err).includes('AbortError');
+        showToast(isTimeout ? '⚠️ Timeout connecting to Bridge. Retrying...' : '⚠️ Could not connect to Bridge to reload models');
       } finally {
         setTimeout(() => {
           refreshModelsBtn.classList.remove('spinning');
-        }, 400);
-        renderModelPickerRows(modelSearchInput.value);
-      }
-
-      if (bridgeSucceeded && loadedFromCloud) {
-        showToast('✅ Modelos actualizados desde APIs en la nube y Bridge');
-      } else if (bridgeSucceeded) {
-        showToast('✅ Modelos actualizados desde Local Bridge');
-      } else if (loadedFromCloud) {
-        showToast('✅ Modelos actualizados directamente desde APIs en la nube');
-      } else {
-        showToast('✅ Catálogo de modelos listo');
+        }, 500);
       }
     });
   }
