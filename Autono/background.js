@@ -1545,7 +1545,7 @@ async function getPageContext(tabId, includeScreenshot = false) {
 }
 
 // ─── Mode 1: Chat Execution (Fast, Full-Screen JSON, Streaming) ─────────────
-async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider = null) {
+async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider = null, retryOnBlock = true) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
   const abortController = new AbortController();
@@ -1809,6 +1809,18 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       fullAnswer += '</thought>\n\n';
       inSyntheticThought = false;
       if (runningTask) runningTask.fullAnswer = fullAnswer;
+    }
+
+    // The Bridge reports a content-safety block as plain text inside a normal response.
+    // Retry the identical request once (the block is often intermittent); if it blocks again,
+    // explain it instead of showing the raw error as if it were the model's answer.
+    if (fullAnswer.length < 800 && /blocked by content safety filters/i.test(fullAnswer)) {
+      if (retryOnBlock) {
+        console.warn('Response blocked by content safety filters; retrying once.');
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        return await handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider, false);
+      }
+      throw new Error('La respuesta fue bloqueada por los filtros de seguridad del modelo (se reintento una vez). Intenta de nuevo, reformula el mensaje o prueba con otro modelo.');
     }
 
     // Task completed successfully

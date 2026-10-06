@@ -12,3 +12,6 @@ coverage/
 .cache/
 .vscode/
 search_script.ps1
+
+# Local-only experimental copy (not published)
+Autotest/
