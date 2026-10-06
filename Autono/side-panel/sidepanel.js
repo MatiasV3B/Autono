@@ -280,7 +280,7 @@ marked.setOptions({
     claude: {
       id: 'claude',
       name: 'Claude',
-      iconSvg: `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Claude">`,
+      iconSvg: `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="Claude">`,
       models: [
         {
           id: 'claude-3-7-sonnet-20250219',
@@ -1537,13 +1537,13 @@ marked.setOptions({
     const welcomeHeading = document.getElementById('welcomeHeading');
     if (welcomeAvatarImg) {
       if (isClaude) {
-        welcomeAvatarImg.src = '../assets/claude-card.png';
+        welcomeAvatarImg.src = '../assets/claude-logo.png';
         welcomeAvatarImg.alt = 'Claude';
       } else if (isOpenAI) {
         welcomeAvatarImg.src = '../assets/chatgpt-logo.svg';
         welcomeAvatarImg.alt = 'ChatGPT';
       } else {
-        welcomeAvatarImg.src = '../assets/antigravity-card.png';
+        welcomeAvatarImg.src = '../assets/antigravity-logo.png';
         welcomeAvatarImg.alt = 'Antigravity';
       }
     }
@@ -1560,15 +1560,15 @@ marked.setOptions({
         : (isOpenAI ? 'Send a message to ChatGPT...' : 'Send a message to Antigravity...');
     }
 
-    // 3. Top Trigger Icon in Header (shows active provider/Autono)
+    // 3. Top Trigger Icon in Header (shows active provider)
     const trigIcon = document.getElementById('modelTriggerIcon');
     if (trigIcon) {
       if (isOpenAI) {
-        trigIcon.innerHTML = `<img src="../assets/chatgpt-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:4px;" alt="ChatGPT">`;
+        trigIcon.innerHTML = `<img src="../assets/chatgpt-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="ChatGPT">`;
       } else if (isClaude) {
-        trigIcon.innerHTML = `<img src="../assets/claude-card-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:4px;" alt="Claude">`;
+        trigIcon.innerHTML = `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="Claude">`;
       } else {
-        trigIcon.innerHTML = `<img src="../assets/icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:4px;" alt="Autono">`;
+        trigIcon.innerHTML = `<img src="../assets/antigravity-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="Antigravity">`;
       }
     }
 
@@ -3130,11 +3130,11 @@ marked.setOptions({
       const isClaude = isClaudeModel(activeModelKey);
       const isOpenAI = isOpenAIModel(activeModelKey);
       if (isClaude) {
-        avatar.innerHTML = `<img src="../assets/claude-card-32.png" width="18" height="18" alt="Claude">`;
+        avatar.innerHTML = `<img src="../assets/claude-icon-32.png" width="18" height="18" alt="Claude">`;
       } else if (isOpenAI) {
         avatar.innerHTML = `<img src="../assets/chatgpt-icon-32.png" width="18" height="18" alt="ChatGPT">`;
       } else {
-        avatar.innerHTML = `<img src="../assets/antigravity-card-32.png" width="18" height="18" alt="Antigravity">`;
+        avatar.innerHTML = `<img src="../assets/antigravity-icon-32.png" width="18" height="18" alt="Antigravity">`;
       }
       row.appendChild(avatar);
 

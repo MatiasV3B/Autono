@@ -17,17 +17,7 @@
         <!-- Model Picker Trigger (ChatGPT Style) -->
         <button id="modelPickerTrigger" class="model-picker-trigger" type="button" aria-haspopup="dialog">
           <span id="modelTriggerIcon" class="model-trigger-icon">
-            <svg viewBox="0 0 296 298" width="16" height="16" fill="none">
-              <mask id="gemini-trig-mask" width="296" height="298" x="0" y="0" maskUnits="userSpaceOnUse" style="mask-type: alpha">
-                <path fill="#3186FF" d="M141.201 4.886c2.282-6.17 11.042-6.071 13.184.148l5.985 17.37a184.004 184.004 0 0 0 111.257 113.049l19.304 6.997c6.143 2.227 6.156 10.91.02 13.155l-19.35 7.082a184.001 184.001 0 0 0-109.495 109.385l-7.573 20.629c-2.241 6.105-10.869 6.121-13.133.025l-7.908-21.296a184 184 0 0 0-109.02-108.658l-19.698-7.239c-6.102-2.243-6.118-10.867-.025-13.132l20.083-7.467A183.998 183.998 0 0 0 133.291 26.28l7.91-21.394Z" />
-              </mask>
-              <g mask="url(#gemini-trig-mask)">
-                <ellipse cx="163" cy="149" fill="#3689FF" rx="196" ry="159" />
-                <ellipse cx="33.5" cy="142.5" fill="#F6C013" rx="68.5" ry="72.5" />
-                <path fill="#FA4340" d="M194 10.5C172 82.5 65.5 134.333 22.5 135L144-66l50 76.5Z" />
-                <path fill="#14BB69" d="M194.5 279.5C172.5 207.5 66 155.667 23 155l121.5 201 50-76.5Z" />
-              </g>
-            </svg>
+            <img src="../assets/antigravity-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;" alt="Antigravity">
           </span>
           <span id="selectedModelLabel" class="model-trigger-name">Gemini 3.8 Flash (Medium)</span>
           <svg class="chevron-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -88,11 +78,11 @@
           <!-- 3 Provider Tabs: Antigravity, Claude, OpenAI -->
           <div class="picker-top-tabs" id="pickerTopTabs">
             <button type="button" class="picker-tab-btn active" data-tab="antigravity" id="tabAntigravityBtn" title="Google Antigravity & Gemini Models">
-              <img src="../assets/antigravity-icon-32.png" width="15" height="15" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Antigravity">
+              <img src="../assets/antigravity-icon-32.png" width="15" height="15" style="object-fit:contain;vertical-align:middle;" alt="Antigravity">
               <span>Antigravity</span>
             </button>
             <button type="button" class="picker-tab-btn" data-tab="claude" id="tabClaudeBtn" title="Anthropic Claude Models">
-              <img src="../assets/claude-icon-32.png" width="15" height="15" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Claude">
+              <img src="../assets/claude-icon-32.png" width="15" height="15" style="object-fit:contain;vertical-align:middle;" alt="Claude">
               <span>Claude</span>
             </button>
             <button type="button" class="picker-tab-btn" data-tab="openai" id="tabOpenaiBtn" title="OpenAI & Codex Models">
@@ -143,7 +133,7 @@
       <!-- ChatGPT Empty State -->
       <div id="welcomeHero" class="chatgpt-welcome">
         <div class="welcome-avatar" id="welcomeAvatar">
-          <img id="welcomeAvatarImg" src="../assets/antigravity-card.png" alt="Antigravity" width="56" height="56" style="object-fit:contain;border-radius:12px;">
+          <img id="welcomeAvatarImg" src="../assets/antigravity-logo.png" alt="Antigravity" width="56" height="56" style="object-fit:contain;">
         </div>
         <h2 class="welcome-heading" id="welcomeHeading">How can Antigravity help you today?</h2>
 
@@ -582,7 +572,7 @@
             <div class="settings-card" id="antigravitySettingsCard">
               <div class="card-header">
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <img src="../assets/antigravity-icon-32.png" width="20" height="20" style="object-fit:contain;border-radius:4px;" alt="Antigravity">
+                  <img src="../assets/antigravity-icon-32.png" width="20" height="20" style="object-fit:contain;" alt="Antigravity">
                   <h4 class="card-title">Google Antigravity</h4>
                 </div>
                 <p class="card-desc">Choose between Local Terminal (local bridge / CLI) or direct Gemini API</p>
@@ -616,7 +606,7 @@
             <div class="settings-card" id="claudeSettingsCard">
               <div class="card-header">
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <img src="../assets/claude-icon-32.png" width="20" height="20" style="object-fit:contain;border-radius:4px;" alt="Claude">
+                  <img src="../assets/claude-icon-32.png" width="20" height="20" style="object-fit:contain;" alt="Claude">
                   <h4 class="card-title">Claude</h4>
                 </div>
                 <p class="card-desc">Choose between direct Claude API (sin Local Bridge) or Local Terminal</p>

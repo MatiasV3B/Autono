@@ -1,10 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
   <defs>
-    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0B132B" />
-      <stop offset="50%" stop-color="#1C2541" />
-      <stop offset="100%" stop-color="#0A1128" />
-    </linearGradient>
     <linearGradient id="orbit-grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00F2FE" />
       <stop offset="50%" stop-color="#4FACFE" />
@@ -19,9 +14,6 @@
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
-
-  <!-- Background circle with subtle cosmic border -->
-  <circle cx="64" cy="64" r="60" fill="url(#bg-grad)" stroke="#1E293B" stroke-width="2" />
 
   <!-- Outer Orbital Ring (Antigravity Field) -->
   <circle cx="64" cy="64" r="44" fill="none" stroke="url(#orbit-grad)" stroke-width="4.5" stroke-dasharray="210 30" transform="rotate(-35 64 64)" filter="url(#neon-glow)" />
