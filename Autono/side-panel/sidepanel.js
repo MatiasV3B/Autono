@@ -1052,6 +1052,13 @@ marked.setOptions({
           appendStreamingResponseBar(currentStreamingBubble, msg.fullAnswer, lastSearchSources);
           updateContextMeter();
           currentStreamingBubble = null;
+        } else if (msg.mode === 'chat' && msg.fullAnswer && msg.fullAnswer.trim()) {
+          // No stream chunk created a bubble (e.g. the provider answered in a single piece): render it now
+          const answerRow = createMessageRow('assistant', msg.fullAnswer);
+          if (answerRow) {
+            appendStreamingResponseBar(answerRow, msg.fullAnswer, lastSearchSources);
+            updateContextMeter();
+          }
         } else if (msg.mode === 'cowork') {
           const finalPlan = msg.plan || currentPlanData || convertLegacyStepsToPlan(msg.steps);
           const reportMd = msg.summary || 'Goal achieved.';
@@ -2420,6 +2427,7 @@ marked.setOptions({
           group.splice(i, 1);
         } else if (source === 'bridge') {
           delete group[i].bridgeTabs;
+          delete group[i].bridgeMatched;
         }
       }
     }
@@ -2445,13 +2453,19 @@ marked.setOptions({
 
       const owner = source === 'bridge' ? String(m.owner || '').toLowerCase() : '';
       const group = getDynamicTargetGroup(source, baseId, owner);
-      const existing = group.find((x) => x.id.toLowerCase() === baseId.toLowerCase());
+      const normId = (s) => String(s).toLowerCase().replace(/\./g, '-');
+      const existing = group.find((x) => normId(x.id) === normId(baseId));
       const tagBridgeTab = (model) => {
         if (source !== 'bridge' || !owner) return;
         if (!Array.isArray(model.bridgeTabs)) model.bridgeTabs = [];
         if (!model.bridgeTabs.includes(owner)) model.bridgeTabs.push(owner);
       };
       if (existing) {
+        if (source === 'bridge') {
+          existing.bridgeMatched = true;
+          // Use the exact id the Bridge knows, otherwise requests would carry a name it does not recognise
+          if (existing.id !== baseId) existing.id = baseId;
+        }
         tagBridgeTab(existing);
         if (m.variants && !existing.variants) existing.variants = m.variants;
         if (!Array.isArray(existing.thinking)) existing.thinking = [];
@@ -2582,6 +2596,12 @@ marked.setOptions({
   }
 
   function pruneModelGroups() {
+    const openaiGroup = PROVIDER_DATA.chatgpt.models;
+    if (openaiGroup.some((m) => m.dynamicSource === 'bridge' || m.bridgeMatched)) {
+      for (let i = openaiGroup.length - 1; i >= 0; i--) {
+        if (!openaiGroup[i].dynamicSource && !openaiGroup[i].bridgeMatched) openaiGroup.splice(i, 1);
+      }
+    }
     // Claude / OpenAI: newest per family; models the Bridge assigns to Antigravity (local terminal) are kept as-is
     pruneGroup(PROVIDER_DATA.claude.models, () => true, isLocalAntigravityModel);
     pruneGroup(PROVIDER_DATA.chatgpt.models, () => true, isLocalAntigravityModel);

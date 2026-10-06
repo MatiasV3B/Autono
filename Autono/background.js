@@ -1545,6 +1545,31 @@ async function getPageContext(tabId, includeScreenshot = false) {
 }
 
 // ─── Mode 1: Chat Execution (Fast, Full-Screen JSON, Streaming) ─────────────
+// Pull the answer out of a response body that was not an SSE stream (OpenAI, Anthropic or Gemini JSON).
+// Throws if the body is an API error.
+function extractAnswerFromRawBody(raw) {
+  const text = String(raw || '').trim();
+  if (!text || !/^[\[{]/.test(text)) return '';
+  let obj;
+  try { obj = JSON.parse(text); } catch { return ''; }
+  const first = Array.isArray(obj) ? obj[0] : obj;
+  if (!first || typeof first !== 'object') return '';
+  const apiError = first.error?.message || (typeof first.error === 'string' ? first.error : '');
+  if (apiError) throw new Error(apiError);
+  const choiceText = first.choices?.[0]?.message?.content;
+  if (typeof choiceText === 'string' && choiceText) return choiceText;
+  if (Array.isArray(first.content)) {
+    const t = first.content.map((c) => c?.text || '').join('');
+    if (t) return t;
+  }
+  const parts = first.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) {
+    const t = parts.map((p) => p?.text || '').join('');
+    if (t) return t;
+  }
+  return '';
+}
+
 async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider = null, retryOnBlock = true) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
@@ -1746,13 +1771,16 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
     const decoder = new TextDecoder('utf-8');
     let fullAnswer = '';
     let buffer = '';
+    let rawBody = '';
     let inSyntheticThought = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      const decodedText = decoder.decode(value, { stream: true });
+      if (rawBody.length < 400000) rawBody += decodedText;
+      buffer += decodedText;
       const lines = buffer.split('\n');
       buffer = lines.pop(); // Keep partial line in buffer
 
@@ -1809,6 +1837,33 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       fullAnswer += '</thought>\n\n';
       inSyntheticThought = false;
       if (runningTask) runningTask.fullAnswer = fullAnswer;
+    }
+
+    // Safety net: the stream produced no text (some APIs answer with plain JSON instead of SSE,
+    // or return an error body). Read it, and as a last resort repeat the request without streaming.
+    if (!fullAnswer.trim()) {
+      let recovered = extractAnswerFromRawBody(rawBody + buffer);
+      if (!recovered) {
+        try {
+          const retryRes = await fetchInferenceWithFallback(endpointInfo, { ...payload, stream: false }, abortController.signal);
+          if (retryRes.ok) {
+            const retryJson = await retryRes.json();
+            recovered = retryJson.choices?.[0]?.message?.content || '';
+          } else {
+            const retryErr = await retryRes.text().catch(() => '');
+            throw new Error(`Error ${retryRes.status}: ${retryErr || retryRes.statusText}`);
+          }
+        } catch (retryErr) {
+          if (retryErr.name === 'AbortError') throw retryErr;
+          throw retryErr;
+        }
+      }
+      if (!recovered || !String(recovered).trim()) {
+        throw new Error('El modelo no devolvio ninguna respuesta. Revisa tu API key, el modelo elegido o intentalo de nuevo.');
+      }
+      fullAnswer = String(recovered);
+      if (runningTask) runningTask.fullAnswer = fullAnswer;
+      broadcastMessage({ type: 'stream_chunk', taskId, sessionId, chunk: fullAnswer, fullAnswer });
     }
 
     // The Bridge reports a content-safety block as plain text inside a normal response.
