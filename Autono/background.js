@@ -103,24 +103,125 @@ const CLOUD_ENDPOINTS = {
   openai: 'https://api.openai.com/v1/chat/completions',
 };
 
+// ─── Simple & Robust Model Recognition Engine ──────────────────────────────
+function recognizeModel(modelName) {
+  const raw = String(modelName || '').trim();
+  const lower = raw.toLowerCase();
+
+  // Strip effort suffixes (-high, -medium, -low, -thinking)
+  let baseId = raw;
+  let effort = null;
+  if (lower.endsWith('-high')) {
+    baseId = raw.slice(0, -5);
+    effort = 'high';
+  } else if (lower.endsWith('-medium')) {
+    baseId = raw.slice(0, -7);
+    effort = 'medium';
+  } else if (lower.endsWith('-low')) {
+    baseId = raw.slice(0, -4);
+    effort = 'low';
+  } else if (lower.endsWith('-thinking')) {
+    baseId = raw.slice(0, -9);
+    effort = 'medium';
+  }
+
+  const baseLower = baseId.toLowerCase();
+
+  // 1. Identify Provider Family
+  let provider = 'gemini';
+  let providerName = 'Google Gemini / Antigravity';
+  if (baseLower.includes('claude') || baseLower.includes('sonnet') || baseLower.includes('opus') || baseLower.includes('haiku') || baseLower.includes('fable')) {
+    provider = 'claude';
+    providerName = 'Anthropic Claude';
+  } else if (baseLower.includes('gpt') || baseLower.includes('codex') || baseLower.includes('o1') || baseLower.includes('o3') || baseLower.includes('o4') || baseLower.includes('davinci')) {
+    provider = 'openai';
+    providerName = 'OpenAI';
+  }
+
+  // 2. Identify Thinking / Reasoning Capability
+  let thinkingType = 'none'; // 'adaptive' | 'budget' | 'reasoning_effort' | 'none'
+  let isReasoningModel = false;
+  let supportsTemperature = true;
+
+  if (provider === 'claude') {
+    if (baseLower.includes('3-7') || baseLower.includes('3.7')) {
+      thinkingType = 'budget';
+      isReasoningModel = true;
+      supportsTemperature = true;
+    } else if (
+      baseLower.includes('5-5') || baseLower.includes('5.5') ||
+      baseLower.includes('4-6') || baseLower.includes('4.6') ||
+      baseLower.includes('4-7') || baseLower.includes('4.7') ||
+      baseLower.includes('opus') || baseLower.includes('sonnet') ||
+      baseLower.includes('fable') || baseLower.includes('haiku')
+    ) {
+      if (baseLower.includes('3-5') || baseLower.includes('3.5')) {
+        thinkingType = 'none';
+        isReasoningModel = false;
+      } else {
+        // Modern Claude models require "thinking.type.adaptive" and "output_config.effort"
+        thinkingType = 'adaptive';
+        isReasoningModel = true;
+        supportsTemperature = false; // Temperature must NOT be set when adaptive thinking is on
+      }
+    }
+  } else if (provider === 'openai') {
+    if (baseLower.startsWith('o1') || baseLower.startsWith('o3') || baseLower.startsWith('o4') || baseLower.includes('gpt-5')) {
+      thinkingType = 'reasoning_effort';
+      isReasoningModel = true;
+      supportsTemperature = false; // OpenAI strictly rejects temperature for reasoning models
+    } else {
+      thinkingType = 'none';
+      isReasoningModel = false;
+      supportsTemperature = true;
+    }
+  } else {
+    // Gemini
+    if (baseLower.includes('3.8') || baseLower.includes('3.7') || baseLower.includes('3.6') || baseLower.includes('3.1')) {
+      thinkingType = 'budget';
+      isReasoningModel = true;
+      supportsTemperature = true;
+    }
+  }
+
+  return {
+    rawId: raw,
+    baseId,
+    provider,
+    providerName,
+    isReasoningModel,
+    thinkingType,
+    effort: effort || 'medium',
+    supportsTemperature,
+  };
+}
+
 // Model mapping for Direct Google Gemini API
 function mapToGeminiApiModel(modelName) {
-  const m = (modelName || '').toLowerCase();
-  return modelName || 'gemini-1.5-flash';
+  const spec = recognizeModel(modelName);
+  return spec.baseId || 'gemini-1.5-flash';
 }
 
 // Model mapping for Direct Anthropic Claude API
 function mapToAnthropicApiModel(modelName) {
-  return modelName || 'claude-3-5-sonnet-20241022';
+  const m = (modelName || '').toLowerCase().trim();
+  if (m.includes('sonnet-5') || m.includes('5.5') || m.includes('5-5')) return 'claude-sonnet-5-5';
+  if (m.includes('opus-5')) return 'claude-opus-5-5';
+  if (m.includes('3-7') || m.includes('3.7')) return 'claude-3-7-sonnet-20250219';
+  if (m.includes('3-5-sonnet') || m.includes('3.5-sonnet')) return 'claude-3-5-sonnet-20241022';
+  if (m.includes('3-5-haiku') || m.includes('3.5-haiku')) return 'claude-3-5-haiku-20241022';
+  return modelName || 'claude-3-7-sonnet-20250219';
 }
 
 // Model mapping for Direct OpenAI API
 function mapToOpenAiApiModel(modelName) {
-  return modelName || 'gpt-4o';
+  const spec = recognizeModel(modelName);
+  return spec.baseId || 'gpt-4o';
 }
 
 // Convert standard OpenAI chat payload to Anthropic Messages API format
 function convertOpenAIToAnthropic(bodyPayload) {
+  const modelSpec = recognizeModel(bodyPayload.model);
   const msgs = bodyPayload.messages || [];
   let systemText = '';
   const antMsgs = [];
@@ -175,7 +276,6 @@ function convertOpenAIToAnthropic(bodyPayload) {
     model: bodyPayload.model,
     messages: mergedMsgs,
     max_tokens: Math.min(bodyPayload.max_tokens || 4096, 8192),
-    temperature: bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2,
     stream: Boolean(bodyPayload.stream),
   };
 
@@ -183,12 +283,36 @@ function convertOpenAIToAnthropic(bodyPayload) {
     antBody.system = systemText;
   }
 
-  if (bodyPayload.thinking_budget && bodyPayload.thinking_budget > 0) {
+  // Configure thinking behavior accurately based on API documentation
+  const effort = bodyPayload.reasoning_effort || bodyPayload.thinking_effort || modelSpec.effort || 'medium';
+  const thinkingBudget = bodyPayload.thinking_budget;
+
+  if (modelSpec.thinkingType === 'adaptive') {
+    // Official Anthropic API documentation:
+    // Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
+    // Temperature must NOT be provided when adaptive thinking is on.
+    antBody.thinking = {
+      type: 'adaptive',
+    };
+    antBody.output_config = {
+      effort: effort === 'high' ? 'high' : (effort === 'low' ? 'low' : 'medium'),
+    };
+  } else if (modelSpec.thinkingType === 'budget' && (thinkingBudget > 0 || (effort && effort !== 'fast'))) {
+    // Claude 3.7 Sonnet token-budget thinking
+    const budget = Math.max(1024, Math.min(thinkingBudget || 4096, 32768));
     antBody.thinking = {
       type: 'enabled',
-      budget_tokens: Math.min(bodyPayload.thinking_budget, 8192),
+      budget_tokens: budget,
     };
+    antBody.max_tokens = Math.max(antBody.max_tokens, budget + 4096);
     antBody.temperature = 1.0;
+  } else {
+    // Standard models without thinking (Claude 3.5 Sonnet, 3.5 Haiku, 3 Opus)
+    if (bodyPayload.temperature !== undefined) {
+      antBody.temperature = bodyPayload.temperature;
+    } else {
+      antBody.temperature = 0.2;
+    }
   }
 
   return antBody;
@@ -385,8 +509,8 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
 
   // Handle direct Anthropic Claude API
   if (isDirectAnthropic) {
-    const antPayload = convertOpenAIToAnthropic(bodyPayload);
-    const antRes = await fetch(url, {
+    let antPayload = convertOpenAIToAnthropic(bodyPayload);
+    let antRes = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(antPayload),
@@ -400,7 +524,43 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
         const errJson = JSON.parse(errText);
         if (errJson.error?.message) errMsg = errJson.error.message;
       } catch {}
-      throw new Error(errMsg);
+
+      // AUTO-RECOVERY 1: If model rejected "thinking.type.enabled" in favor of adaptive thinking
+      if (errMsg.includes('thinking.type.adaptive') || errMsg.includes('output_config.effort')) {
+        console.warn('Anthropic API requested adaptive thinking. Retrying with adaptive parameters...');
+        antPayload.thinking = { type: 'adaptive' };
+        antPayload.output_config = { effort: antPayload.output_config?.effort || 'medium' };
+        delete antPayload.temperature;
+        antRes = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(antPayload),
+          signal,
+        });
+      }
+      // AUTO-RECOVERY 2: If model rejected thinking altogether
+      else if (errMsg.includes('thinking') && (errMsg.includes('not supported') || errMsg.includes('unsupported'))) {
+        console.warn('Anthropic API model does not support thinking. Retrying without thinking...');
+        delete antPayload.thinking;
+        delete antPayload.output_config;
+        antPayload.temperature = 0.2;
+        antRes = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(antPayload),
+          signal,
+        });
+      }
+
+      if (!antRes.ok) {
+        const finalErrText = await antRes.text().catch(() => '');
+        let finalErrMsg = errMsg;
+        try {
+          const finalJson = JSON.parse(finalErrText);
+          if (finalJson.error?.message) finalErrMsg = finalJson.error.message;
+        } catch {}
+        throw new Error(finalErrMsg);
+      }
     }
 
     if (!bodyPayload.stream) {
@@ -434,14 +594,26 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
   // Standard OpenAI-compatible format (Direct Gemini, Direct OpenAI, Custom Providers, or Bridge)
   let cleanPayload = bodyPayload;
   if (isDirectCloud) {
-    // Cloud APIs (like Google Gemini) strictly reject non-standard fields:
-    // e.g. "Unknown name 'max_output_tokens'", "Unknown name 'antigravity_mode'", etc.
+    const modelSpec = recognizeModel(endpointInfo.model || bodyPayload.model);
     cleanPayload = {
       model: endpointInfo.model,
       messages: bodyPayload.messages || [],
-      temperature: bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2,
       stream: Boolean(bodyPayload.stream),
     };
+
+    if (provider === 'openai') {
+      if (modelSpec.thinkingType === 'reasoning_effort') {
+        // OpenAI reasoning models (o1, o3, etc.) - DO NOT SEND TEMPERATURE
+        cleanPayload.reasoning_effort = modelSpec.effort || 'medium';
+      } else {
+        // Standard OpenAI models (gpt-4o, etc.)
+        cleanPayload.temperature = bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2;
+      }
+    } else {
+      // Gemini Direct Cloud
+      cleanPayload.temperature = bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2;
+    }
+
     if (bodyPayload.max_tokens) {
       cleanPayload.max_tokens = Math.min(bodyPayload.max_tokens, 8192);
     }
@@ -462,7 +634,25 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
       if (errJson.error?.message) errMsg = errJson.error.message;
       else if (Array.isArray(errJson) && errJson[0]?.error?.message) errMsg = errJson[0].error.message;
     } catch {}
-    throw new Error(errMsg);
+
+    // AUTO-RECOVERY for OpenAI parameter conflicts:
+    if (provider === 'openai') {
+      if (errMsg.includes('temperature') && errMsg.includes('not supported')) {
+        console.warn('OpenAI model does not support temperature. Retrying without temperature...');
+        delete cleanPayload.temperature;
+        cleanPayload.reasoning_effort = cleanPayload.reasoning_effort || 'medium';
+        res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(cleanPayload), signal });
+      } else if (errMsg.includes('reasoning_effort') && errMsg.includes('not supported')) {
+        console.warn('OpenAI model does not support reasoning_effort. Retrying with temperature...');
+        delete cleanPayload.reasoning_effort;
+        cleanPayload.temperature = 0.2;
+        res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(cleanPayload), signal });
+      }
+    }
+
+    if (!res.ok) {
+      throw new Error(errMsg);
+    }
   }
 
   // Seamless fallback to root /v1/chat/completions if local bridge lacks /{provider}/ prefix

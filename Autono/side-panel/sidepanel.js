@@ -120,6 +120,7 @@ marked.setOptions({
   let currentIntroText = '';
   let allSessions = [];
   let lastUserPrompt = '';
+  let lastTaskProvider = null;
   let lastAttachedItems = [];
   let lastSearchSources = [];
   let latestModelSuggestions = [];
@@ -407,6 +408,13 @@ marked.setOptions({
 
   let activeProvider = 'gemini';
   let activeModelTab = 'antigravity'; // 'antigravity', 'claude', or 'openai'
+  // Tab the current model was picked from. It decides the engine: Claude/GPT models picked under
+  // 'antigravity' run on the local terminal; the Claude/OpenAI APIs only apply from their own tabs.
+  let modelRoute = null;
+  try {
+    const savedRoute = localStorage.getItem('antigravity_model_route');
+    if (['antigravity', 'claude', 'openai'].includes(savedRoute)) modelRoute = savedRoute;
+  } catch (_) {}
 
   function generateId() {
     return 'chat-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
@@ -679,33 +687,55 @@ marked.setOptions({
     }
   }
 
-  // ─── AI Error Handler Component Helper (Structured SVG card with Code, Desc & Retry) ───
+  // ─── AI Error Handler Component Helper (Structured SVG card with Code, Explanation, Copy & Retry) ───
   function createAiErrorCard(rawError = '') {
     const errString = typeof rawError === 'string' ? rawError : (rawError?.message || JSON.stringify(rawError));
-    let code = 'ERROR';
-    let title = 'Inference Request Failed';
-    let desc = errString;
+    let code = 'ERR_INFERENCE';
+    let title = 'Fallo en la Petición de Inferencia';
+    let explanation = 'La API o el servicio local devolvió un error durante la generación. Puedes copiar el código de error y el reporte técnico para analizarlo o consultar con soporte.';
+    let recommendation = 'Revisa los detalles técnicos y haz clic en Reintentar.';
 
-    if (errString.includes('404')) {
-      code = '404';
-      title = 'Endpoint Not Found';
-      desc = 'The endpoint or model called does not exist on the configured bridge. Verify your bridge URL or external provider settings and try again.';
-    } else if (errString.includes('429')) {
-      code = '429';
-      title = 'Quota Exceeded';
-      desc = 'You have exceeded your Antigravity or provider quota. Please wait a moment or try again later.';
-    } else if (errString.includes('401') || errString.includes('403')) {
-      code = '401';
-      title = 'Authentication Error';
-      desc = 'Invalid or expired API credentials. Please check your provider API key in settings.';
-    } else if (errString.includes('Failed to fetch') || errString.includes('NetworkError')) {
-      code = 'NET';
-      title = 'Connection Refused';
-      desc = 'Could not reach the local bridge server or external provider. Ensure Model Bridge is running locally at http://127.0.0.1:8765.';
+    if (errString.includes('thinking.type.enabled') || errString.includes('thinking.type.adaptive') || errString.includes('output_config.effort')) {
+      code = '400_THINKING_ADAPTIVE';
+      title = 'Parámetro de Pensamiento no Soportado (Claude)';
+      explanation = 'El modelo Claude seleccionado requiere el nuevo estándar de razonamiento adaptativo ("thinking.type: adaptive" y "output_config.effort") en vez del presupuesto fijo de tokens antiguo ("thinking.type: enabled"). Autono y Model Bridge se han actualizado para adaptar este parámetro automáticamente.';
+      recommendation = 'Haz clic en "Reintentar Petición" para continuar con los nuevos parámetros adaptativos aplicados.';
+    } else if (errString.includes('temperature') && errString.includes('not supported')) {
+      code = '400_TEMPERATURE_O1';
+      title = 'Parámetro Incompatible en Modelo de Razonamiento (OpenAI)';
+      explanation = 'Los modelos de razonamiento de OpenAI (o1, o3-mini) no permiten configurar el parámetro "temperature". Solo admiten el parámetro "reasoning_effort" (low, medium, high). Autono omite automáticamente la temperatura para estos modelos.';
+      recommendation = 'Haz clic en "Reintentar Petición" para enviar sin el parámetro temperature.';
+    } else if (errString.includes('Unknown name') || errString.includes('max_output_tokens') || errString.includes('antigravity_mode')) {
+      code = '400_INVALID_PAYLOAD';
+      title = 'Parámetros no estándar rechazados por la API Directa';
+      explanation = 'La API directa de Google Gemini rechazó parámetros que no forman parte del esquema oficial (como "max_output_tokens" o "antigravity_mode"). Autono limpia automáticamente los payloads directos para ajustarse al estándar oficial.';
+      recommendation = 'Haz clic en "Reintentar Petición" con los campos normalizados.';
+    } else if (errString.includes('401') || errString.includes('403') || errString.includes('Unauthorized') || errString.includes('Authentication Error')) {
+      code = '401_AUTH_ERROR';
+      title = 'Error de Autenticación / API Key Inválida';
+      explanation = 'La clave de API provista para este proveedor no es válida, ha expirado o no tiene saldo/permisos suficientes. Verifica la API Key en el menú de Configuración (engranaje ⚙️).';
+      recommendation = 'Ve a Ajustes, ingresa una clave de API válida y vuelve a intentar.';
+    } else if (errString.includes('429') || errString.includes('Quota Exceeded') || errString.includes('rate_limit') || errString.includes('RESOURCE_EXHAUSTED')) {
+      code = '429_RATE_LIMIT';
+      title = 'Límite de Cuota o Velocidad Alcanzado';
+      explanation = 'Has superado el límite de peticiones o tokens permitidos por minuto/semana para este modelo. Este límite es impuesto directamente por el proveedor de IA.';
+      recommendation = 'Espera unos instantes o cambia a otro modelo disponible en el selector superior.';
+    } else if (errString.includes('404')) {
+      code = '404_NOT_FOUND';
+      title = 'Modelo o Endpoint no Encontrado';
+      explanation = 'El modelo o la URL solicitada no existe en la API configurada o el Bridge. Si usas API Directa, verifica que el ID del modelo exista en tu nivel de cuenta.';
+      recommendation = 'Presiona el botón de recargar modelos o selecciona un modelo estándar.';
+    } else if (errString.includes('Failed to fetch') || errString.includes('NetworkError') || errString.includes('Connection Refused') || errString.includes('No es posible conectar')) {
+      code = 'NET_CONN_REFUSED';
+      title = 'No se puede conectar con Local Bridge';
+      explanation = 'No fue posible establecer conexión con el servidor local en http://127.0.0.1:8765. Asegúrate de que el proceso Antigravity Bridge esté encendido, o cambia el modelo a "API Directa" en Ajustes.';
+      recommendation = 'Inicia el servidor local o activa el modo API Directa con tu clave de API.';
     }
 
+    const activeModelName = currentModel || currentBaseModelId || 'Modelo Activo';
+
     return `
-      <div class="ai-error-card">
+      <div class="ai-error-card" data-error-code="${escapeHtml(code)}" data-raw-error="${escapeHtml(errString)}">
         <div class="ai-error-header">
           <div class="ai-error-icon-wrap">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -715,13 +745,39 @@ marked.setOptions({
             </svg>
           </div>
           <div class="ai-error-title-wrap">
-            <span class="ai-error-code-badge">Error ${escapeHtml(code)}</span>
+            <span class="ai-error-code-badge">${escapeHtml(code)}</span>
             <span class="ai-error-title">${escapeHtml(title)}</span>
           </div>
-          <button type="button" class="ai-error-dismiss-btn" title="Dismiss">&times;</button>
+          <button type="button" class="ai-error-dismiss-btn" title="Descartar">&times;</button>
         </div>
-        <div class="ai-error-desc">${escapeHtml(desc)}</div>
+
+        <div class="ai-error-explanation">
+          <div class="ai-error-explanation-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18h6"></path><path d="M10 22h4"></path>
+              <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path>
+            </svg>
+            <span>¿Qué está pasando?</span>
+          </div>
+          <div class="ai-error-explanation-body">${escapeHtml(explanation)}</div>
+        </div>
+
+        <div class="ai-error-tech-wrap">
+          <div class="ai-error-tech-header">
+            <span>Mensaje Técnico</span>
+            <span class="ai-error-model-tag">${escapeHtml(activeModelName)}</span>
+          </div>
+          <pre class="ai-error-tech-pre">${escapeHtml(errString)}</pre>
+        </div>
+
         <div class="ai-error-actions">
+          <button type="button" class="ai-error-copy-btn" title="Copiar código y reporte de error para analizarlo">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+            </svg>
+            <span>Copiar Código de Error</span>
+          </button>
           <button type="button" class="ai-error-retry-btn">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
@@ -729,7 +785,7 @@ marked.setOptions({
               <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
               <path d="M8 16H3v5"></path>
             </svg>
-            <span>Retry Request</span>
+            <span>Reintentar Petición</span>
           </button>
         </div>
       </div>
@@ -740,7 +796,52 @@ marked.setOptions({
     if (!container) return;
     const retryBtn = container.querySelector('.ai-error-retry-btn');
     const dismissBtn = container.querySelector('.ai-error-dismiss-btn');
+    const copyBtn = container.querySelector('.ai-error-copy-btn');
     const errorCard = container.querySelector('.ai-error-card');
+
+    // ─── Copy Error Code & Diagnostic Handler ─────────────────────────────
+    copyBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = errorCard?.getAttribute('data-error-code') || 'ERROR';
+      const raw = errorCard?.getAttribute('data-raw-error') || '';
+      const exp = errorCard?.querySelector('.ai-error-explanation-body')?.textContent || '';
+      const modelTag = errorCard?.querySelector('.ai-error-model-tag')?.textContent || currentModel || 'N/A';
+      const title = errorCard?.querySelector('.ai-error-title')?.textContent || 'Error';
+
+      const diagnosticReport = [
+        `=== DIAGNÓSTICO DE ERROR DE AUTONO ===`,
+        `Código de Error: ${code}`,
+        `Título: ${title}`,
+        `Modelo Activo: ${modelTag}`,
+        `Pestaña/Proveedor: ${activeModelTab || 'N/A'}`,
+        `Fecha y Hora: ${new Date().toISOString()}`,
+        ``,
+        `¿QUÉ ESTÁ PASANDO?:`,
+        `${exp}`,
+        ``,
+        `DETALLE TÉCNICO RAW:`,
+        `${raw}`,
+        `=======================================`,
+      ].join('\n');
+
+      navigator.clipboard.writeText(diagnosticReport).then(() => {
+        const originalHtml = copyBtn.innerHTML;
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = `
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span>✓ Copiado</span>
+        `;
+        showToast('✓ Código y reporte de error copiado al portapapeles. ¡Listo para analizar!');
+        setTimeout(() => {
+          copyBtn.classList.remove('copied');
+          copyBtn.innerHTML = originalHtml;
+        }, 2500);
+      }).catch(() => {
+        showToast('Error al copiar al portapapeles');
+      });
+    });
 
     retryBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -833,6 +934,21 @@ marked.setOptions({
           }
           scrollToBottom(true);
         }
+        break;
+
+      case 'session_title':
+        if (msg.sessionId === currentSessionId && msg.title) {
+          showTitleSuggestionBanner(msg.title);
+        }
+        pendingTitleSessions.delete(msg.sessionId);
+        break;
+
+      case 'session_title_failed':
+        if (msg.sessionId === currentSessionId) {
+          const fallbackTitle = generateSmartTitle(lastUserPrompt, '');
+          if (fallbackTitle && fallbackTitle !== 'New Chat') showTitleSuggestionBanner(fallbackTitle);
+        }
+        pendingTitleSessions.delete(msg.sessionId);
         break;
 
       case 'bridge_status':
@@ -1210,6 +1326,10 @@ marked.setOptions({
     if (baseModelId === 'gpt-oss-120b-medium') {
       return 'gpt-oss-120b-medium';
     }
+    for (const pKey of Object.keys(PROVIDER_DATA)) {
+      const dyn = PROVIDER_DATA[pKey].models.find((x) => x.id === baseModelId);
+      if (dyn && dyn.variants && dyn.variants[effort]) return dyn.variants[effort];
+    }
     return baseModelId;
   }
 
@@ -1220,7 +1340,7 @@ marked.setOptions({
     // Check direct base ID match
     for (const pKey of Object.keys(PROVIDER_DATA)) {
       const p = PROVIDER_DATA[pKey];
-      const m = p.models.find((item) => item.id === clean);
+      const m = p.models.find((item) => String(item.id).toLowerCase() === clean);
       if (m) {
         return { model: m, provider: p, effort: m.defaultThinking || 'medium' };
       }
@@ -1228,7 +1348,7 @@ marked.setOptions({
 
     // Check external providers models
     for (const extP of externalProviders) {
-      const m = (extP.models || []).find((item) => item.id === clean);
+      const m = (extP.models || []).find((item) => String(item.id).toLowerCase() === clean);
       if (m) {
         const provObj = PROVIDER_DATA[extP.id] || {
           id: extP.id,
@@ -1402,16 +1522,102 @@ marked.setOptions({
     });
   }
 
+  // ─── Simple & Robust Model Recognition Engine ──────────────────────────────
+  function recognizeModel(modelId) {
+    const raw = String(modelId || '').trim();
+    const lower = raw.toLowerCase();
+
+    let baseId = raw;
+    let effort = null;
+    if (lower.endsWith('-high')) {
+      baseId = raw.slice(0, -5);
+      effort = 'high';
+    } else if (lower.endsWith('-medium')) {
+      baseId = raw.slice(0, -7);
+      effort = 'medium';
+    } else if (lower.endsWith('-low')) {
+      baseId = raw.slice(0, -4);
+      effort = 'low';
+    } else if (lower.endsWith('-thinking')) {
+      baseId = raw.slice(0, -9);
+      effort = 'medium';
+    }
+
+    const baseLower = baseId.toLowerCase();
+    let provider = 'gemini';
+    let providerName = 'Google Gemini / Antigravity';
+
+    if (baseLower.includes('claude') || baseLower.includes('sonnet') || baseLower.includes('opus') || baseLower.includes('haiku') || baseLower.includes('fable')) {
+      provider = 'claude';
+      providerName = 'Anthropic Claude';
+    } else if (baseLower.includes('gpt') || baseLower.includes('codex') || baseLower.includes('o1') || baseLower.includes('o3') || baseLower.includes('o4') || baseLower.includes('davinci')) {
+      provider = 'openai';
+      providerName = 'OpenAI';
+    }
+
+    let thinkingType = 'none';
+    let isReasoningModel = false;
+    let supportsTemperature = true;
+
+    if (provider === 'claude') {
+      if (baseLower.includes('3-7') || baseLower.includes('3.7')) {
+        thinkingType = 'budget';
+        isReasoningModel = true;
+        supportsTemperature = true;
+      } else if (
+        baseLower.includes('5-5') || baseLower.includes('5.5') ||
+        baseLower.includes('4-6') || baseLower.includes('4.6') ||
+        baseLower.includes('4-7') || baseLower.includes('4.7') ||
+        baseLower.includes('opus') || baseLower.includes('sonnet') ||
+        baseLower.includes('fable') || baseLower.includes('haiku')
+      ) {
+        if (baseLower.includes('3-5') || baseLower.includes('3.5')) {
+          thinkingType = 'none';
+          isReasoningModel = false;
+        } else {
+          thinkingType = 'adaptive';
+          isReasoningModel = true;
+          supportsTemperature = false;
+        }
+      }
+    } else if (provider === 'openai') {
+      if (baseLower.startsWith('o1') || baseLower.startsWith('o3') || baseLower.startsWith('o4') || baseLower.includes('gpt-5')) {
+        thinkingType = 'reasoning_effort';
+        isReasoningModel = true;
+        supportsTemperature = false;
+      } else {
+        thinkingType = 'none';
+        isReasoningModel = false;
+        supportsTemperature = true;
+      }
+    } else {
+      if (baseLower.includes('3.8') || baseLower.includes('3.7') || baseLower.includes('3.6') || baseLower.includes('3.1')) {
+        thinkingType = 'budget';
+        isReasoningModel = true;
+        supportsTemperature = true;
+      }
+    }
+
+    return {
+      rawId: raw,
+      baseId,
+      provider,
+      providerName,
+      isReasoningModel,
+      thinkingType,
+      effort: effort || 'medium',
+      supportsTemperature,
+    };
+  }
+
   function isClaudeModel(modelId) {
     if (!modelId) return false;
-    const s = String(modelId).toLowerCase();
-    return s.includes('claude') || s.includes('fable') || s.includes('haiku') || s.includes('sonnet') || s.includes('opus');
+    return recognizeModel(modelId).provider === 'claude';
   }
 
   function isOpenAIModel(modelId) {
     if (!modelId) return false;
-    const s = String(modelId).toLowerCase();
-    return s.includes('gpt') || s.includes('codex') || s.includes('o3') || s.includes('oss');
+    return recognizeModel(modelId).provider === 'openai';
   }
 
   function updateDynamicBranding(modelId) {
@@ -1505,9 +1711,13 @@ marked.setOptions({
   }
 
   // ─── Model Picker Popover Logic (Hierarchical Rail: Gemini, Claude, OpenAI) ───
-  function selectModel(modelId, preserveEffort = false) {
-    const match = findModelByAnyId(modelId);
-    if (!match) return;
+  function selectModel(modelId, preserveEffort = false, route = null) {
+    let match = findModelByAnyId(modelId);
+    if (!match || !match.model) {
+      const latest = findLatestModelInFamily(modelId);
+      match = latest ? findModelByAnyId(latest.id) : null;
+    }
+    if (!match || !match.model) return;
 
     const { model, provider, effort } = match;
     currentBaseModelId = model.id;
@@ -1522,7 +1732,13 @@ marked.setOptions({
     currentModel = resolveAntigravityModelId(currentBaseModelId, currentThinkingEffort);
 
     // Update category tab & rail active state
-    if (isClaudeModel(model.id)) {
+    const routeFits = (r) => r === 'antigravity'
+      || (r === 'claude' && isClaudeModel(model.id))
+      || (r === 'openai' && !isClaudeModel(model.id) && isOpenAIModel(model.id));
+    const wantedRoute = route || modelRoute;
+    if (wantedRoute && routeFits(wantedRoute)) {
+      activeModelTab = wantedRoute;
+    } else if (isClaudeModel(model.id)) {
       activeModelTab = 'claude';
     } else if (model.id === 'gpt-oss-120b-medium') {
       if (model.usageGroup === 'gemini' || activeModelTab === 'antigravity') {
@@ -1535,6 +1751,8 @@ marked.setOptions({
     } else {
       activeModelTab = 'antigravity';
     }
+    modelRoute = activeModelTab;
+    try { localStorage.setItem('antigravity_model_route', modelRoute); } catch (_) {}
     updatePickerTabsUI();
 
     document.querySelectorAll('.picker-rail .rail-btn').forEach((b) => {
@@ -1713,8 +1931,18 @@ marked.setOptions({
     `).join('');
 
     const isGptOss = model.id === 'gpt-oss-120b-medium';
+    const forcedLocal = activeModelTab === 'antigravity' && (isClaudeFamily || isOpenAIFamily || isGptOss);
     let engineModeHtml = '';
-    if (isGptOss) {
+    if (forcedLocal) {
+      engineModeHtml = `
+        <div class="preview-config-section" style="margin-top:8px;">
+          <div class="preview-config-label">EXECUTION ENGINE</div>
+          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;">
+            🟢 Antigravity Local Terminal (runs locally via the Bridge). To use the official API, pick this model from the ${isClaudeFamily ? 'Claude' : 'OpenAI'} tab.
+          </div>
+        </div>
+      `;
+    } else if (isGptOss) {
       const gptOssMode = currentOpenaiMode === 'api' ? 'api' : 'desktop';
       engineModeHtml = `
         <div class="preview-config-section" style="margin-top:8px;">
@@ -1933,6 +2161,25 @@ marked.setOptions({
     });
   }
 
+  function setAntigravityModeQuiet(mode) {
+    if (currentAntigravityMode === mode) return;
+    currentAntigravityMode = mode;
+    if (settingAntigravityMode) settingAntigravityMode.value = mode;
+    try { localStorage.setItem('antigravity_antigravity_mode', mode); } catch (_) {}
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['antigravity_settings'], (res) => {
+        const prev = res.antigravity_settings || {};
+        prev.antigravityMode = mode;
+        chrome.storage.local.set({ antigravity_settings: prev, antigravity_antigravity_mode: mode });
+      });
+    }
+    if (mode === 'api') {
+      showToast(currentGeminiApiKey ? '⚡ Gemini API active' : '⚠️ Gemini API active. Configure Gemini Key in Settings');
+    } else {
+      showToast('💻 Local Terminal active');
+    }
+  }
+
   function renderModelPickerRows(searchQuery = '') {
     modelRowsList.innerHTML = '';
     const q = typeof searchQuery === 'string' ? searchQuery.toLowerCase().trim() : '';
@@ -1955,19 +2202,23 @@ marked.setOptions({
     } else {
       if (activeModelTab === 'claude') {
         // Claude tab: all Claude models
-        modelsToRender = PROVIDER_DATA.claude.models;
+        modelsToRender = PROVIDER_DATA.claude.models.filter((m) => !m.localOnly);
       } else if (activeModelTab === 'openai') {
         // OpenAI tab: all OpenAI models (Codex, GPT-4o, o3-mini, GPT-OSS)
         modelsToRender = PROVIDER_DATA.chatgpt.models;
       } else {
         // Antigravity models tab: Gemini + older Claude models (Sonnet 4.6, Opus 4.6)
-        const olderClaudeModels = PROVIDER_DATA.claude.models.filter((m) =>
-          ['claude-sonnet-4-6', 'claude-opus-4-6-thinking'].includes(m.id)
-        );
-        modelsToRender = [
-          ...PROVIDER_DATA.gemini.models,
-          ...olderClaudeModels,
-        ];
+        // Section 1: everything the Bridge runs locally. Section 2: Gemini API models (only when loaded)
+        const seen = new Set();
+        const localModels = [
+          ...PROVIDER_DATA.gemini.models.filter((m) => m.dynamicSource !== 'gemini'),
+          ...PROVIDER_DATA.claude.models.filter(isLocalAntigravityModel),
+          ...PROVIDER_DATA.chatgpt.models.filter(isLocalAntigravityModel),
+        ].filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+        const apiModels = PROVIDER_DATA.gemini.models.filter((m) => m.dynamicSource === 'gemini');
+        modelsToRender = apiModels.length > 0
+          ? [{ __header: 'Antigravity · Local Terminal' }, ...localModels, { __header: 'Gemini API' }, ...apiModels]
+          : localModels;
       }
     }
 
@@ -1982,6 +2233,14 @@ marked.setOptions({
     }
 
     modelsToRender.forEach((m) => {
+      if (m.__header) {
+        const header = document.createElement('div');
+        header.className = 'model-row-desc';
+        header.style.cssText = 'padding:8px 12px 4px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#a1a1aa;';
+        header.textContent = m.__header;
+        modelRowsList.appendChild(header);
+        return;
+      }
       const row = document.createElement('div');
       const isSelected = m.id === currentBaseModelId;
       row.className = `model-row ${isSelected ? 'selected' : ''}`;
@@ -2007,7 +2266,11 @@ marked.setOptions({
       });
 
       row.addEventListener('click', () => {
-        selectModel(m.id);
+        // Antigravity tab: Gemini API section -> API mode, local section -> local terminal
+        if (!q && activeModelTab === 'antigravity' && m.usageGroup === 'gemini' && PROVIDER_DATA.gemini.models.includes(m)) {
+          setAntigravityModeQuiet(m.dynamicSource === 'gemini' ? 'api' : 'desktop');
+        }
+        selectModel(m.id, false, q ? null : activeModelTab);
       });
 
       modelRowsList.appendChild(row);
@@ -2046,7 +2309,9 @@ marked.setOptions({
   function openModelPicker() {
     modelPickerTrigger.classList.add('open');
     modelPickerPopover.classList.remove('hidden');
-    if (isClaudeModel(currentBaseModelId)) {
+    if (modelRoute) {
+      activeModelTab = modelRoute;
+    } else if (isClaudeModel(currentBaseModelId)) {
       activeModelTab = 'claude';
     } else if (currentBaseModelId === 'gpt-oss-120b-medium') {
       if (activeModelTab !== 'openai') {
@@ -2099,104 +2364,386 @@ marked.setOptions({
     });
   }
 
-  // Reload Models from Bridge Button
+  // ─── Dynamic model loading: Bridge / local terminal + direct provider APIs ───
+  const DYNAMIC_MODELS_KEY = 'antigravity_dynamic_models';
+  const API_MODEL_ENDPOINTS = {
+    gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
+    claude: 'https://api.anthropic.com/v1/models?limit=1000',
+    openai: 'https://api.openai.com/v1/models',
+  };
+
+  function prettifyModelId(id) {
+    return String(id)
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((p) => (/^\d/.test(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+      .join(' ');
+  }
+
+  function getDynamicTargetGroup(source, modelId, owner) {
+    if (source === 'gemini') return PROVIDER_DATA.gemini.models;
+    // The Bridge says which tab owns each model (owned_by: antigravity | claude | openai)
+    if (source === 'bridge' && owner === 'claude') return PROVIDER_DATA.claude.models;
+    if (source === 'bridge' && owner === 'openai') return PROVIDER_DATA.chatgpt.models;
+    if (source === 'bridge' && owner === 'antigravity') {
+      return isClaudeModel(modelId) ? PROVIDER_DATA.claude.models : PROVIDER_DATA.gemini.models;
+    }
+    if (source === 'claude') return PROVIDER_DATA.claude.models;
+    if (source === 'openai') return PROVIDER_DATA.chatgpt.models;
+    if (isClaudeModel(modelId)) return PROVIDER_DATA.claude.models;
+    if (isOpenAIModel(modelId)) return PROVIDER_DATA.chatgpt.models;
+    return PROVIDER_DATA.gemini.models;
+  }
+
+  // Remove models previously injected from a source so a refresh replaces (not accumulates) them
+  function clearDynamicModels(source) {
+    for (const pKey of ['gemini', 'claude', 'chatgpt']) {
+      const group = PROVIDER_DATA[pKey]?.models;
+      if (!Array.isArray(group)) continue;
+      for (let i = group.length - 1; i >= 0; i--) {
+        if (group[i].dynamicSource === source) {
+          group.splice(i, 1);
+        } else if (source === 'bridge') {
+          delete group[i].bridgeTabs;
+        }
+      }
+    }
+  }
+
+  // entries: [{ id, name?, thinking?, defaultThinking?, desc?, contextWindow? }]
+  function applyDynamicModels(source, entries, normalizeEffort) {
+    clearDynamicModels(source);
+    let added = 0;
+    entries.forEach((m) => {
+      let baseId = String(m.id || '').trim();
+      if (!baseId) return;
+      let effort = null;
+      if (normalizeEffort) {
+        const suffix = baseId.match(/-(high|medium|low|thinking)$/);
+        if (suffix) {
+          effort = suffix[1];
+          baseId = baseId.slice(0, -suffix[0].length);
+        }
+        if (baseId === 'gpt-oss-120b') baseId = 'gpt-oss-120b-medium';
+      }
+
+      const owner = source === 'bridge' ? String(m.owner || '').toLowerCase() : '';
+      const group = getDynamicTargetGroup(source, baseId, owner);
+      const existing = group.find((x) => x.id.toLowerCase() === baseId.toLowerCase());
+      const tagBridgeTab = (model) => {
+        if (source !== 'bridge' || !owner) return;
+        if (!Array.isArray(model.bridgeTabs)) model.bridgeTabs = [];
+        if (!model.bridgeTabs.includes(owner)) model.bridgeTabs.push(owner);
+      };
+      if (existing) {
+        tagBridgeTab(existing);
+        if (m.variants && !existing.variants) existing.variants = m.variants;
+        if (!Array.isArray(existing.thinking)) existing.thinking = [];
+        const extra = Array.isArray(m.thinking) ? m.thinking : (effort ? [effort] : []);
+        extra.forEach((th) => {
+          if (!existing.thinking.includes(th)) existing.thinking.push(th);
+        });
+        return;
+      }
+
+      const thinkingOpts = Array.isArray(m.thinking) && m.thinking.length > 0
+        ? [...m.thinking]
+        : (effort ? [effort] : ['low', 'medium', 'high']);
+      const claude = group === PROVIDER_DATA.claude.models;
+      const openai = group === PROVIDER_DATA.chatgpt.models;
+      const cleanName = String(m.name || baseId).replace(/\s*\((High|Medium|Low|Thinking)\)\s*$/i, '').trim();
+      group.push({
+        id: baseId,
+        name: cleanName || baseId,
+        desc: m.desc || `Dynamic model loaded from ${source === 'bridge' ? 'Antigravity Bridge' : source + ' API'}`,
+        contextWindow: m.contextWindow || '1.0M tokens',
+        metrics: { intelligence: 8, speed: 7, context: 8, efficiency: 7 },
+        caps: ['reasoning', 'image'],
+        thinking: thinkingOpts,
+        defaultThinking: m.defaultThinking || (thinkingOpts.includes('medium') ? 'medium' : thinkingOpts[0]),
+        usageGroup: claude || openai ? 'claude_gpt' : 'gemini',
+        dynamicSource: source,
+        variants: m.variants || undefined,
+      });
+      tagBridgeTab(group[group.length - 1]);
+      added++;
+    });
+    return added;
+  }
+
+  function persistDynamicModels(source, entries, normalizeEffort) {
+    try {
+      const all = JSON.parse(localStorage.getItem(DYNAMIC_MODELS_KEY) || '{}');
+      all[source] = { entries, normalizeEffort: !!normalizeEffort };
+      localStorage.setItem(DYNAMIC_MODELS_KEY, JSON.stringify(all));
+    } catch (_) {}
+  }
+
+  // Claude models Antigravity runs on the local terminal. They are always offered in the Antigravity
+  // section, whatever the Bridge happens to report. localOnly ones are hidden from the Claude tab.
+  [
+    ['claude-sonnet-5-5', false],
+    ['claude-opus-5-5', false],
+    ['claude-sonnet-4-6', true],
+    ['claude-opus-4-6-thinking', true],
+  ].forEach(([id, localOnly]) => {
+    const m = PROVIDER_DATA.claude.models.find((x) => x.id === id);
+    if (!m) return;
+    m.antigravityLocal = true;
+    if (localOnly) m.localOnly = true;
+  });
+
+  // Restore the last successfully loaded catalogs so the picker isn't empty before the first refresh
+  try {
+    const saved = JSON.parse(localStorage.getItem(DYNAMIC_MODELS_KEY) || '{}');
+    Object.keys(saved).forEach((source) => {
+      const s = saved[source];
+      if (s && Array.isArray(s.entries)) applyDynamicModels(source, s.entries, s.normalizeEffort);
+    });
+  } catch (_) {}
+
+  // ─── Keep only the newest model of each family (max 10 per group) ───
+  const MAX_MODELS_PER_GROUP = 10;
+  const PRUNED_GROUPS = ['gemini', 'claude', 'chatgpt'];
+
+  // "claude-opus-4-8" -> { family: 'claude-opus', version: [4, 8] }; effort/alias/date tokens are ignored
+  function modelFamilyInfo(id) {
+    const family = [];
+    const version = [];
+    String(id).toLowerCase().split(/[-_\s]+/).filter(Boolean).forEach((t) => {
+      if (/^\d{8}$/.test(t)) return; // date stamp (20250514)
+      if (/^(low|medium|high|thinking|max|active|latest|preview|exp|experimental)$/.test(t)) return;
+      if (/^\d+(\.\d+)*[a-z]?$/.test(t)) {
+        t.replace(/[a-z]$/, '').split('.').forEach((n) => version.push(parseInt(n, 10)));
+        return;
+      }
+      const o = t.match(/^o(\d+)$/); // o3, o4-mini
+      if (o) {
+        family.push('o');
+        version.push(parseInt(o[1], 10));
+        return;
+      }
+      family.push(t);
+    });
+    return { family: family.join('-'), version };
+  }
+
+  function compareModelVersions(a, b) {
+    const len = Math.max(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+      const d = (a[i] || 0) - (b[i] || 0);
+      if (d !== 0) return d;
+    }
+    return 0;
+  }
+
+  // Keeps the newest model of each family inside one group (max 10).
+  //  - inScope: models that compete with each other (others are never touched)
+  //  - isExempt: models that stay even if they are not the newest of their family
+  function pruneGroup(group, inScope, isExempt) {
+    const best = new Map();
+    group.filter(inScope).forEach((m) => {
+      const { family, version } = modelFamilyInfo(m.id);
+      const cur = best.get(family);
+      const cmp = cur ? compareModelVersions(version, cur.version) : 1;
+      if (!cur || cmp > 0 || (cmp === 0 && String(m.id).length < String(cur.model.id).length)) {
+        best.set(family, { model: m, version });
+      }
+    });
+    const keep = new Set(
+      [...best.values()]
+        .sort((a, b) => compareModelVersions(b.version, a.version))
+        .slice(0, MAX_MODELS_PER_GROUP)
+        .map((x) => x.model)
+    );
+    for (let i = group.length - 1; i >= 0; i--) {
+      const m = group[i];
+      if (!inScope(m) || isExempt(m) || keep.has(m)) continue;
+      group.splice(i, 1);
+    }
+  }
+
+  function isLocalAntigravityModel(m) {
+    return !!m.antigravityLocal || (Array.isArray(m.bridgeTabs) && m.bridgeTabs.includes('antigravity'));
+  }
+
+  function pruneModelGroups() {
+    // Claude / OpenAI: newest per family; models the Bridge assigns to Antigravity (local terminal) are kept as-is
+    pruneGroup(PROVIDER_DATA.claude.models, () => true, isLocalAntigravityModel);
+    pruneGroup(PROVIDER_DATA.chatgpt.models, () => true, isLocalAntigravityModel);
+    // Gemini: the local (Antigravity) list is never trimmed; only the API section uses the "newest" rule
+    pruneGroup(PROVIDER_DATA.gemini.models, (m) => m.dynamicSource === 'gemini', () => false);
+  }
+
+  function findLatestModelInFamily(modelId) {
+    const { family } = modelFamilyInfo(modelId);
+    let bestModel = null;
+    let bestVersion = null;
+    PRUNED_GROUPS.forEach((pKey) => {
+      (PROVIDER_DATA[pKey]?.models || []).forEach((m) => {
+        const info = modelFamilyInfo(m.id);
+        if (info.family === family && (!bestVersion || compareModelVersions(info.version, bestVersion) > 0)) {
+          bestModel = m;
+          bestVersion = info.version;
+        }
+      });
+    });
+    return bestModel;
+  }
+
+  // If the selected model was discarded, move to the newest model of its family
+  function ensureSelectedModelStillExists() {
+    const exists = PRUNED_GROUPS.some((pKey) => (PROVIDER_DATA[pKey]?.models || []).some((m) => m.id === currentBaseModelId));
+    if (exists) return;
+    const replacement = findLatestModelInFamily(currentBaseModelId) || PROVIDER_DATA.gemini.models[0];
+    if (replacement) selectModel(replacement.id, false, modelRoute);
+  }
+
+  // Drop outdated models from the built-in catalog and the restored one right away
+  pruneModelGroups();
+
+  async function fetchBridgeModels(bridgeUrl) {
+    // Ask the Bridge to rescan its CLIs; failure here is non-fatal, the catalog fetch decides the outcome
+    await fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(10000) }).catch(() => null);
+    const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Bridge returned status ${res.status}`);
+    const data = await res.json();
+    const list = data.data || data.models || [];
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((m) => (typeof m === 'string' ? { id: m } : {
+        id: m.id || m.model,
+        name: m.display_name || m.name,
+        thinking: m.thinking,
+        defaultThinking: m.default_thinking,
+        desc: m.desc || m.description,
+        contextWindow: m.context_window,
+        owner: m.owned_by,
+        variants: m.variants,
+        alias: m.owned_by?.includes?.('alias'),
+      }))
+      .filter((m) => typeof m.id === 'string' && !m.alias && !m.id.includes('->'));
+  }
+
+  async function fetchGeminiApiModels(apiKey) {
+    const entries = [];
+    let pageToken = '';
+    for (let page = 0; page < 10; page++) {
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+      const res = await fetch(url, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) {
+        throw new Error(res.status === 400 || res.status === 401 || res.status === 403 ? 'invalid API key' : `status ${res.status}`);
+      }
+      const json = await res.json();
+      (json.models || []).forEach((m) => {
+        const id = String(m.name || '').replace(/^models\//, '');
+        const methods = m.supportedGenerationMethods || [];
+        if (!/^gemini/i.test(id) || !methods.includes('generateContent')) return;
+        if (/embedding|tts|image|live|native-audio|aqa/i.test(id)) return;
+        entries.push({
+          id,
+          name: m.displayName || prettifyModelId(id),
+          desc: m.description ? String(m.description).slice(0, 140) : undefined,
+          contextWindow: m.inputTokenLimit ? `${Math.round(m.inputTokenLimit / 1000)}K tokens` : undefined,
+        });
+      });
+      pageToken = json.nextPageToken || '';
+      if (!pageToken) break;
+    }
+    return entries;
+  }
+
+  async function fetchApiModels(source, apiKey) {
+    if (source === 'gemini') return fetchGeminiApiModels(apiKey);
+    let headers;
+    if (source === 'claude') {
+      headers = {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      };
+    } else {
+      headers = { Authorization: `Bearer ${apiKey}` };
+    }
+    const res = await fetch(API_MODEL_ENDPOINTS[source], { headers, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) {
+      throw new Error(res.status === 401 || res.status === 403 || res.status === 400 ? 'invalid API key' : `status ${res.status}`);
+    }
+    const json = await res.json();
+    const list = Array.isArray(json.data) ? json.data : (Array.isArray(json.models) ? json.models : []);
+    let entries = list.map((m) => {
+      const id = String(m.id || m.name || '').replace(/^models\//, '');
+      return { id, name: m.display_name || prettifyModelId(id) };
+    }).filter((m) => m.id);
+
+    if (source === 'gemini') {
+      entries = entries.filter((m) => /^gemini/i.test(m.id) && !/embedding|aqa|imagen|veo|tts|image|live|audio/i.test(m.id));
+    } else if (source === 'openai') {
+      entries = entries.filter((m) => /^(gpt-|o\d|chatgpt-|codex)/i.test(m.id) && !/instruct|embedding|audio|realtime|transcribe|tts|image|moderation|search|whisper|dall/i.test(m.id));
+    }
+    return entries;
+  }
+
+  // Reload Models: Bridge / local terminal (desktop mode) + direct provider APIs (API mode)
   const refreshModelsBtn = document.getElementById('refreshModelsBtn');
   if (refreshModelsBtn) {
     refreshModelsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (refreshModelsBtn.dataset.loading === '1') return;
+      refreshModelsBtn.dataset.loading = '1';
       refreshModelsBtn.classList.add('spinning');
+
       const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+      const providers = [
+        { source: 'gemini', label: 'Gemini', mode: settingAntigravityMode?.value || currentAntigravityMode, key: (settingGeminiApiKey?.value || currentGeminiApiKey || '').trim() },
+        { source: 'claude', label: 'Claude', mode: settingClaudeMode?.value || currentClaudeMode, key: (settingAnthropicApiKey?.value || currentAnthropicApiKey || '').trim() },
+        { source: 'openai', label: 'OpenAI', mode: settingOpenaiMode?.value || currentOpenaiMode, key: (settingOpenaiApiKey?.value || currentOpenaiApiKey || '').trim() },
+      ];
+      const apiProviders = providers.filter((p) => p.mode === 'api' && p.key);
+      const missingKey = providers.filter((p) => p.mode === 'api' && !p.key).map((p) => p.label);
+
       try {
-        // Trigger model refresh on Bridge asynchronously
-        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(15000) }).catch(() => null);
+        const tasks = [
+          fetchBridgeModels(bridgeUrl).then((entries) => ({ source: 'bridge', label: 'Bridge', entries, normalize: true })),
+          ...apiProviders.map((p) => fetchApiModels(p.source, p.key).then((entries) => ({ source: p.source, label: p.label, entries, normalize: false }))),
+        ];
+        const labels = ['Bridge', ...apiProviders.map((p) => p.label)];
+        const results = await Promise.allSettled(tasks);
 
-        // Fetch fresh model catalog from Bridge
-        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(15000) });
-        if (res.ok) {
-          const data = await res.json();
-          const fetchedList = data.data || data.models || [];
-          if (Array.isArray(fetchedList) && fetchedList.length > 0) {
-            let addedCount = 0;
-            fetchedList.forEach((m) => {
-              const mId = m.id || m.model || m;
-              if (typeof mId !== 'string') return;
-              // Skip raw alias references that map to other roots
-              if (m.owned_by?.includes('alias') || mId.includes('->')) return;
-
-              // Extract canonical base ID and thinking effort
-              let baseId = mId;
-              let effort = null;
-              if (mId.endsWith('-high')) {
-                baseId = mId.slice(0, -5);
-                effort = 'high';
-              } else if (mId.endsWith('-medium')) {
-                baseId = mId.slice(0, -7);
-                effort = 'medium';
-              } else if (mId.endsWith('-low')) {
-                baseId = mId.slice(0, -4);
-                effort = 'low';
-              } else if (mId.endsWith('-thinking')) {
-                baseId = mId.slice(0, -9);
-                effort = 'thinking';
-              }
-
-              // Preserve standard GPT-OSS ID
-              if (baseId === 'gpt-oss-120b') {
-                baseId = 'gpt-oss-120b-medium';
-              }
-
-              const isClaude = isClaudeModel(baseId);
-              const isOpenAI = isOpenAIModel(baseId);
-              const targetGroup = isClaude ? PROVIDER_DATA.claude.models : (isOpenAI ? PROVIDER_DATA.chatgpt.models : PROVIDER_DATA.gemini.models);
-
-              // Check if canonical model already exists in target group
-              const existing = targetGroup.find((x) => x.id === baseId || x.id === mId);
-              if (existing) {
-                // Merge thinking options cleanly without duplicate model cards
-                if (Array.isArray(m.thinking)) {
-                  m.thinking.forEach((th) => {
-                    if (!existing.thinking.includes(th)) existing.thinking.push(th);
-                  });
-                } else if (effort && !existing.thinking.includes(effort)) {
-                  existing.thinking.push(effort);
-                }
-              } else {
-                // Create single clean base model card
-                const cleanName = (m.display_name || m.name || baseId).replace(/\s*\((High|Medium|Low|Thinking)\)\s*$/i, '').trim();
-                const thinkingOpts = Array.isArray(m.thinking) && m.thinking.length > 0
-                  ? [...m.thinking]
-                  : (effort ? [effort] : ['low', 'medium', 'high']);
-
-                targetGroup.push({
-                  id: baseId,
-                  name: cleanName || baseId,
-                  desc: m.desc || m.description || `Dynamic model loaded from ${isClaude ? 'Claude' : (isOpenAI ? 'OpenAI / Codex' : 'Antigravity')}`,
-                  contextWindow: m.context_window || '1.0M tokens',
-                  metrics: { intelligence: 8, speed: 7, context: 8, efficiency: 7 },
-                  caps: ['reasoning', 'image'],
-                  thinking: thinkingOpts,
-                  defaultThinking: m.default_thinking || (thinkingOpts.includes('medium') ? 'medium' : thinkingOpts[0]),
-                  usageGroup: isClaude || isOpenAI ? 'claude_gpt' : 'gemini',
-                });
-                addedCount++;
-              }
-            });
-            showToast('✅ Models refreshed from CLIs & Bridge');
+        const loaded = [];
+        const failed = [];
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled') {
+            applyDynamicModels(r.value.source, r.value.entries, r.value.normalize);
+            persistDynamicModels(r.value.source, r.value.entries, r.value.normalize);
+            loaded.push(`${r.value.label} (${r.value.entries.length})`);
           } else {
-            showToast('✅ Models up to date');
+            console.warn(`Refresh models error [${labels[i]}]:`, r.reason);
+            // An offline Bridge is expected when only API providers are used
+            if (labels[i] !== 'Bridge' || apiProviders.length === 0) {
+              failed.push(labels[i] === 'Bridge' ? 'Bridge (offline)' : `${labels[i]} (${r.reason?.message || 'error'})`);
+            }
           }
-          renderModelPickerRows(modelSearchInput.value);
-        } else {
-          showToast(`⚠️ Bridge returned status ${res.status}`);
+        });
+
+        if (loaded.length) {
+          pruneModelGroups();
+          ensureSelectedModelStillExists();
         }
+        renderModelPickerRows(modelSearchInput.value);
+
+        let msg = loaded.length ? `✅ Models loaded (latest versions only): ${loaded.join(', ')}` : '⚠️ No models loaded';
+        if (failed.length) msg += ` — ⚠️ ${failed.join(', ')}`;
+        if (missingKey.length) msg += ` — add API key for ${missingKey.join(', ')}`;
+        showToast(msg, 6000);
       } catch (err) {
         console.warn('Refresh models error:', err);
-        const isTimeout = err?.name === 'TimeoutError' || String(err).includes('AbortError');
-        showToast(isTimeout ? '⚠️ Timeout connecting to Bridge. Retrying...' : '⚠️ Could not connect to Bridge to reload models');
+        showToast('⚠️ Could not reload models');
       } finally {
         setTimeout(() => {
           refreshModelsBtn.classList.remove('spinning');
-        }, 500);
+          refreshModelsBtn.dataset.loading = '0';
+        }, 300);
       }
     });
   }
@@ -2750,10 +3297,11 @@ marked.setOptions({
     }
     scrollToBottom();
 
-    const effectiveProvider = isClaudeModel(currentModel)
+    const effectiveProvider = modelRoute || (isClaudeModel(currentModel)
       ? 'claude'
-      : (isOpenAIModel(currentModel) ? 'openai' : (activeModelTab || 'antigravity'));
+      : (isOpenAIModel(currentModel) ? 'openai' : (activeModelTab || 'antigravity')));
 
+    lastTaskProvider = effectiveProvider;
     if (mode === 'chat') {
       sendPortMessage({
         type: 'start_chat',
@@ -3091,6 +3639,7 @@ marked.setOptions({
   const editTitleBtn = document.getElementById('editTitleBtn');
   const dismissTitleBtn = document.getElementById('dismissTitleBtn');
   let currentSuggestedTitle = '';
+  const pendingTitleSessions = new Set();
 
   function generateSmartTitle(promptText, summaryText) {
     let raw = (promptText || '').replace(/^\/\S+\s*/, '').trim();
@@ -3163,11 +3712,17 @@ marked.setOptions({
   function handleAutoNamingAfterTask(answerText) {
     const session = allSessions.find(s => s.id === currentSessionId);
     const isGeneric = !session || !session.title || session.title === 'New Chat' || session.title === 'Nuevo Chat' || session.title.endsWith('...') || session.title === 'Chat';
-    if (isGeneric && lastUserPrompt) {
-      const smartTitle = generateSmartTitle(lastUserPrompt, answerText);
-      if (smartTitle && smartTitle !== 'New Chat' && smartTitle !== 'Nuevo Chat') {
-        showTitleSuggestionBanner(smartTitle);
-      }
+    if (isGeneric && lastUserPrompt && !pendingTitleSessions.has(currentSessionId)) {
+      // Ask the model for the title; the background replies with session_title (or session_title_failed → heuristic fallback)
+      pendingTitleSessions.add(currentSessionId);
+      sendPortMessage({
+        type: 'generate_title',
+        sessionId: currentSessionId,
+        prompt: lastUserPrompt,
+        answer: String(answerText || '').slice(0, 1200),
+        modelName: currentModel,
+        provider: lastTaskProvider,
+      });
     }
   }
 
