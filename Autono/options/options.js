@@ -59,13 +59,13 @@
       maxOutputTokensInput.value = s.maxOutputTokens;
     }
 
-    if (antigravityModeSelect) antigravityModeSelect.value = s.antigravityMode || data.antigravity_antigravity_mode || 'desktop';
+    if (antigravityModeSelect) antigravityModeSelect.value = s.antigravityMode || data.antigravity_antigravity_mode || 'api';
     if (geminiApiKeyInput) geminiApiKeyInput.value = s.geminiApiKey || data.antigravity_gemini_api_key || '';
 
-    if (claudeModeSelect) claudeModeSelect.value = s.claudeMode || data.antigravity_claude_mode || 'desktop';
+    if (claudeModeSelect) claudeModeSelect.value = s.claudeMode || data.antigravity_claude_mode || 'api';
     if (anthropicApiKeyInput) anthropicApiKeyInput.value = s.anthropicApiKey || data.antigravity_anthropic_api_key || '';
 
-    if (openaiModeSelect) openaiModeSelect.value = s.openaiMode || data.antigravity_openai_mode || 'desktop';
+    if (openaiModeSelect) openaiModeSelect.value = s.openaiMode || data.antigravity_openai_mode || 'api';
     if (openaiApiKeyInput) openaiApiKeyInput.value = s.openaiApiKey || data.antigravity_openai_api_key || '';
 
     if (limitSonnetInput) limitSonnetInput.value = limits['claude-sonnet-4-6'] || 45;
@@ -115,11 +115,11 @@
       temperature: parseFloat(tempInput.value),
       maxSteps: parseInt(maxStepsInput.value, 10) || 20,
       maxOutputTokens: parseInt(maxOutputTokensInput.value, 10) || 65536,
-      antigravityMode: antigravityModeSelect ? antigravityModeSelect.value : 'desktop',
+      antigravityMode: antigravityModeSelect ? antigravityModeSelect.value : 'api',
       geminiApiKey: geminiApiKeyInput ? geminiApiKeyInput.value.trim() : '',
-      claudeMode: claudeModeSelect ? claudeModeSelect.value : 'desktop',
+      claudeMode: claudeModeSelect ? claudeModeSelect.value : 'api',
       anthropicApiKey: anthropicApiKeyInput ? anthropicApiKeyInput.value.trim() : '',
-      openaiMode: openaiModeSelect ? openaiModeSelect.value : 'desktop',
+      openaiMode: openaiModeSelect ? openaiModeSelect.value : 'api',
       openaiApiKey: openaiApiKeyInput ? openaiApiKeyInput.value.trim() : '',
     };
 

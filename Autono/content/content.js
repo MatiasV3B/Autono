@@ -267,6 +267,34 @@
       chrome.runtime.sendMessage({ type: 'open_side_panel' });
     });
 
+    // Emergency Close / Cancel button to prevent user page lockouts
+    const stopOverlayBtn = document.createElement('button');
+    stopOverlayBtn.type = 'button';
+    stopOverlayBtn.id = '__antigravity_overlay_close_btn';
+    stopOverlayBtn.innerHTML = '✕';
+    stopOverlayBtn.title = 'Cancel agent task and dismiss overlay';
+    Object.assign(stopOverlayBtn.style, {
+      background: 'rgba(239, 68, 68, 0.18)',
+      border: '1px solid rgba(239, 68, 68, 0.45)',
+      color: '#f87171',
+      borderRadius: '50%',
+      width: '24px',
+      height: '24px',
+      fontSize: '12px',
+      fontWeight: '700',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.15s ease',
+      marginLeft: '2px',
+    });
+    stopOverlayBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideWorkOverlay();
+      chrome.runtime.sendMessage({ type: 'cancel_task' });
+    });
+
     inlineInputBox.appendChild(inlineInput);
     inlineInputBox.appendChild(sendInlineBtn);
 
@@ -275,6 +303,7 @@
     banner.appendChild(pauseBtn);
     banner.appendChild(writeBtn);
     banner.appendChild(inlineInputBox);
+    banner.appendChild(stopOverlayBtn);
     overlay.appendChild(banner);
 
     // Keyframes style
@@ -497,6 +526,9 @@
   window.addEventListener(
     'keydown',
     (e) => {
+      // Must be a trusted physical event from the user to prevent webpage synthetic hijacking
+      if (!e.isTrusted) return;
+
       // Optional fallback: Alt + Control + C or Alt + Shift + C -> Open Side Panel
       const isC = e.key === 'c' || e.key === 'C' || e.code === 'KeyC';
       const isAltCtrlC = (e.ctrlKey || e.metaKey) && e.altKey && isC;
@@ -562,6 +594,7 @@
   window.addEventListener(
     'keyup',
     (e) => {
+      if (!e.isTrusted) return;
       if (isZeroKey(e)) heldKeys.delete('0');
       if (isNineKey(e)) heldKeys.delete('9');
     },

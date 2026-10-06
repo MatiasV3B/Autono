@@ -591,16 +591,16 @@
                 <div class="setting-field">
                   <label for="settingAntigravityMode">Execution Engine</label>
                   <select id="settingAntigravityMode">
-                    <option value="desktop" selected>Local Terminal (Local Bridge / CLI)</option>
-                    <option value="api">Gemini API (Direct Google Gemini API Key)</option>
+                    <option value="api" selected>Gemini API (Direct Google Gemini Key - Sin Local Bridge)</option>
+                    <option value="desktop">Local Terminal (Local Bridge / CLI)</option>
                   </select>
                   <div class="field-hint">
-                    Select Local Terminal for bridge-managed execution or Gemini API for direct Google AI Studio requests.
+                    Select Gemini API for direct cloud requests without Local Bridge, or Local Terminal for bridge execution.
                   </div>
                 </div>
 
                 <div class="setting-field" id="geminiKeyContainer">
-                  <label for="settingGeminiApiKey">Google Gemini API Key (Optional for API mode)</label>
+                  <label for="settingGeminiApiKey">Google Gemini API Key (Direct API)</label>
                   <div class="input-with-action">
                     <input type="password" id="settingGeminiApiKey" placeholder="AIzaSy..." autocomplete="off">
                     <button type="button" id="toggleGeminiKeyVisibility" class="field-action-btn" title="Toggle key visibility">👁</button>
@@ -619,17 +619,17 @@
                   <img src="../assets/claude-icon-32.png" width="20" height="20" style="object-fit:contain;border-radius:4px;" alt="Claude">
                   <h4 class="card-title">Claude</h4>
                 </div>
-                <p class="card-desc">Choose between Local Terminal (local CLI) or direct Claude API</p>
+                <p class="card-desc">Choose between direct Claude API (sin Local Bridge) or Local Terminal</p>
               </div>
               <div class="card-content">
                 <div class="setting-field">
                   <label for="settingClaudeMode">Execution Engine</label>
                   <select id="settingClaudeMode">
-                    <option value="desktop" selected>Local Terminal (Local CLI / Terminal)</option>
-                    <option value="api">Claude API (Direct Anthropic API Key)</option>
+                    <option value="api" selected>Claude API (Direct Anthropic Key - Sin Local Bridge)</option>
+                    <option value="desktop">Local Terminal (Local CLI / Terminal)</option>
                   </select>
                   <div class="field-hint" id="claudeModeHint">
-                    Run Claude through your Local Terminal environment or invoke the official Anthropic API directly.
+                    Invoke official Anthropic API directly without Local Bridge, or run locally via CLI.
                   </div>
                 </div>
 
@@ -655,14 +655,14 @@
                   </svg>
                   <h4 class="card-title">OpenAI & Codex</h4>
                 </div>
-                <p class="card-desc">Choose between Local Terminal (local CLI) or direct ChatGPT / OpenAI API</p>
+                <p class="card-desc">Choose between direct OpenAI API (sin Local Bridge) or Local Terminal</p>
               </div>
               <div class="card-content">
                 <div class="setting-field">
                   <label for="settingOpenaiMode">Execution Engine</label>
                   <select id="settingOpenaiMode">
-                    <option value="desktop" selected>Local Terminal (Local CLI)</option>
-                    <option value="api">ChatGPT API (Direct OpenAI API Key)</option>
+                    <option value="api" selected>ChatGPT API (Direct OpenAI Key - Sin Local Bridge)</option>
+                    <option value="desktop">Local Terminal (Local CLI)</option>
                   </select>
                   <div class="field-hint">
                     Run OpenAI models through Local Terminal or connect directly using an OpenAI API Key.

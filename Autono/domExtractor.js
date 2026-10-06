@@ -111,18 +111,29 @@
         const ariaLabel = inp.getAttribute('aria-label') || '';
         const labelEl = inp.id ? document.querySelector(`label[for="${inp.id}"]`) : inp.closest('label');
         const label = labelEl ? cleanText(labelEl.innerText) : (ariaLabel || placeholder || name || 'Campo de texto');
-        const value = inp.value ? cleanText(inp.value).slice(0, 300) : '';
+        // Check for sensitive fields to prevent credential and PII leakage
+        const isPassword = type === 'password';
+        const autocomplete = (inp.getAttribute('autocomplete') || '').toLowerCase();
+        const isSensitivePattern = /(password|passwd|pwd|passcode|token|secret|pin|cvv|cvc|creditcard|cardnumber|ssn|auth)/i.test(`${name} ${placeholder} ${ariaLabel}`);
+        const isSensitive = isPassword || autocomplete.includes('password') || autocomplete.includes('cc-') || isSensitivePattern;
+
+        let safeValue = '';
+        if (inp.value) {
+          safeValue = isSensitive ? '[PROTECTED_INPUT]' : cleanText(inp.value).slice(0, 300);
+        }
+
         const idx = elemIndex++;
         window.__antigravity_dom_map.set(idx, inp);
         inp.setAttribute('data-highlight-index', String(idx));
 
         inputs.push({
           index: idx,
-          type,
+          type: isSensitive ? 'password' : type,
           label: label || 'Campo sin etiqueta',
           selector: getElementSelector(inp),
           placeholder: placeholder || undefined,
-          value: value || undefined,
+          value: safeValue || undefined,
+          isSensitive: isSensitive || undefined,
         });
       }
     });

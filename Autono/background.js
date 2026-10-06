@@ -7,19 +7,23 @@ const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_MODEL = 'gemini-3.8-flash-medium';
 
 const PRELOADED_MODELS = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Direct API)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Direct API)' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Direct API)' },
   { id: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
   { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
   { id: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
   { id: 'gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash (Medium)' },
-  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
-  { id: 'gemini-3.7-flash-low', name: 'Gemini 3.7 Flash (Low)' },
-  { id: 'gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash (Medium)' },
-  { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)' },
-  { id: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' },
   { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
-  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)' },
+  { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet (Direct API)' },
+  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Direct API)' },
+  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Direct API)' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
   { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
+  { id: 'gpt-4o', name: 'GPT-4o (Direct API)' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Direct API)' },
+  { id: 'o3-mini', name: 'o3-mini (Direct API)' },
+  { id: 'gpt-6-luna', name: 'GPT-6 Luna (Codex)' },
   { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
 ];
 
@@ -54,11 +58,11 @@ async function getSettings() {
     selectedModel: s.selectedModel || DEFAULT_MODEL,
     localMcpBridgeEnabled: s.localMcpBridgeEnabled !== undefined ? s.localMcpBridgeEnabled : (data.autono_local_mcp_bridge_enabled !== undefined ? Boolean(data.autono_local_mcp_bridge_enabled) : false),
     localMcpUrl: s.localMcpUrl || data.autono_local_mcp_url || `${s.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`,
-    antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
+    antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'api',
     geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
-    claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
+    claudeMode: s.claudeMode || data.antigravity_claude_mode || 'api',
     anthropicApiKey: s.anthropicApiKey || data.antigravity_anthropic_api_key || '',
-    openaiMode: s.openaiMode || data.antigravity_openai_mode || 'desktop',
+    openaiMode: s.openaiMode || data.antigravity_openai_mode || 'api',
     openaiApiKey: s.openaiApiKey || data.antigravity_openai_api_key || '',
     temperature: s.temperature !== undefined ? s.temperature : 0.2,
     autoCaptureScreenshot: !!s.autoCaptureScreenshot,
@@ -91,14 +95,182 @@ function getProviderModes(modelName, settings) {
   const isGemini = !isClaude && !isGptOss && typeof modelName === 'string' && modelName.toLowerCase().includes('gemini');
 
   return {
-    antigravity_mode: isGemini ? (settings.antigravityMode || 'desktop') : 'desktop',
+    antigravity_mode: isGemini ? (settings.antigravityMode || 'api') : 'api',
     gemini_api_key: isGemini ? (settings.geminiApiKey || undefined) : undefined,
-    claude_mode: isClaude ? (settings.claudeMode || 'desktop') : undefined,
+    claude_mode: isClaude ? (settings.claudeMode || 'api') : undefined,
     anthropic_api_key: isClaude ? (settings.anthropicApiKey || undefined) : undefined,
     api_key: isClaude ? (settings.anthropicApiKey || undefined) : undefined,
-    openai_mode: (!isClaude && !isGemini) ? (settings.openaiMode || 'desktop') : undefined,
+    openai_mode: (!isClaude && !isGemini) ? (settings.openaiMode || 'api') : undefined,
     openai_api_key: (!isClaude && !isGemini) ? (settings.openaiApiKey || undefined) : undefined,
   };
+}
+
+// Direct Cloud API Official Endpoints
+const CLOUD_ENDPOINTS = {
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+  claude: 'https://api.anthropic.com/v1/messages',
+  openai: 'https://api.openai.com/v1/chat/completions',
+};
+
+// Model mapping for Direct Google Gemini API
+function mapToGeminiApiModel(modelName) {
+  const m = (modelName || '').toLowerCase();
+  if (m.includes('pro')) return 'gemini-2.5-pro';
+  if (m.includes('3.8') || m.includes('3.7') || m.includes('3.6') || m.includes('flash')) return 'gemini-2.5-flash';
+  if (m.startsWith('gemini-')) return modelName;
+  return 'gemini-2.5-flash';
+}
+
+// Model mapping for Direct Anthropic Claude API
+function mapToAnthropicApiModel(modelName) {
+  const m = (modelName || '').toLowerCase();
+  if (m.includes('opus')) return 'claude-3-opus-20240229';
+  if (m.includes('haiku')) return 'claude-3-5-haiku-20241022';
+  if (m.includes('sonnet') || m.includes('fable')) return 'claude-3-7-sonnet-20250219';
+  if (m.startsWith('claude-3')) return modelName;
+  return 'claude-3-7-sonnet-20250219';
+}
+
+// Model mapping for Direct OpenAI API
+function mapToOpenAiApiModel(modelName) {
+  const m = (modelName || '').toLowerCase();
+  if (m.includes('mini')) return 'gpt-4o-mini';
+  if (m.includes('o3') || m.includes('o1')) return 'o3-mini';
+  if (m.startsWith('gpt-4') || m.startsWith('o1') || m.startsWith('o3')) return modelName;
+  return 'gpt-4o';
+}
+
+// Convert standard OpenAI chat payload to Anthropic Messages API format
+function convertOpenAIToAnthropic(bodyPayload) {
+  const msgs = bodyPayload.messages || [];
+  let systemText = '';
+  const antMsgs = [];
+
+  for (const m of msgs) {
+    if (m.role === 'system') {
+      systemText += (systemText ? '\n\n' : '') + (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+    } else if (m.role === 'user' || m.role === 'assistant') {
+      let content = m.content;
+      if (Array.isArray(content)) {
+        content = content.map(part => {
+          if (part.type === 'image_url') {
+            const url = part.image_url?.url || '';
+            if (url.startsWith('data:')) {
+              const [header, b64] = url.split(',');
+              const mediaType = header.split(':')[1]?.split(';')[0] || 'image/jpeg';
+              return {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: b64 }
+              };
+            }
+          }
+          return { type: 'text', text: part.text || '' };
+        });
+      }
+      antMsgs.push({ role: m.role, content });
+    }
+  }
+
+  if (antMsgs.length === 0 || antMsgs[0].role !== 'user') {
+    antMsgs.unshift({ role: 'user', content: 'Hello' });
+  }
+
+  // Merge consecutive same-role messages
+  const mergedMsgs = [];
+  for (const m of antMsgs) {
+    if (mergedMsgs.length > 0 && mergedMsgs[mergedMsgs.length - 1].role === m.role) {
+      const prev = mergedMsgs[mergedMsgs.length - 1];
+      if (typeof prev.content === 'string' && typeof m.content === 'string') {
+        prev.content += '\n\n' + m.content;
+      } else {
+        const prevArr = Array.isArray(prev.content) ? prev.content : [{ type: 'text', text: prev.content }];
+        const currArr = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }];
+        prev.content = [...prevArr, ...currArr];
+      }
+    } else {
+      mergedMsgs.push({ ...m });
+    }
+  }
+
+  const antBody = {
+    model: bodyPayload.model,
+    messages: mergedMsgs,
+    max_tokens: Math.min(bodyPayload.max_tokens || 4096, 8192),
+    temperature: bodyPayload.temperature !== undefined ? bodyPayload.temperature : 0.2,
+    stream: Boolean(bodyPayload.stream),
+  };
+
+  if (systemText) {
+    antBody.system = systemText;
+  }
+
+  if (bodyPayload.thinking_budget && bodyPayload.thinking_budget > 0) {
+    antBody.thinking = {
+      type: 'enabled',
+      budget_tokens: Math.min(bodyPayload.thinking_budget, 8192),
+    };
+    antBody.temperature = 1.0;
+  }
+
+  return antBody;
+}
+
+// Transform Anthropic SSE stream chunks into OpenAI SSE chunks for background consumers
+function transformAnthropicStreamToOpenAI(readableStream) {
+  const reader = readableStream.getReader();
+  const decoder = new TextDecoder('utf-8');
+  const encoder = new TextEncoder();
+  let buffer = '';
+
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr === '[DONE]') continue;
+
+            try {
+              const event = JSON.parse(dataStr);
+              if (event.type === 'content_block_delta') {
+                const delta = event.delta;
+                if (delta) {
+                  if (delta.type === 'text_delta' && delta.text) {
+                    const openAiChunk = {
+                      choices: [{ delta: { content: delta.text } }],
+                    };
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAiChunk)}\n\n`));
+                  } else if (delta.type === 'thinking_delta' && delta.thinking) {
+                    const openAiChunk = {
+                      choices: [{ delta: { reasoning_content: delta.thinking } }],
+                    };
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAiChunk)}\n\n`));
+                  }
+                }
+              } else if (event.type === 'message_stop') {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              }
+            } catch {
+              // Ignore partial JSON
+            }
+          }
+        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+  });
 }
 
 async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider = null) {
@@ -106,6 +278,7 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
   const cleanBase = (defaultBase || 'http://127.0.0.1:8765').replace(/\/+$/, '');
   const targetModel = modelName || DEFAULT_MODEL;
 
+  // 1. External / Custom OpenAI-compatible Providers (e.g. OpenRouter, Groq)
   const extProviders = await getExternalProviders();
   for (const prov of extProviders) {
     const hasModel = (prov.models || []).some(m => m.id === targetModel);
@@ -117,10 +290,11 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
       if (prov.apiKey) {
         headers['Authorization'] = `Bearer ${prov.apiKey}`;
       }
-      return { url, headers, model: actualModel };
+      return { url, headers, model: actualModel, isDirectCloud: true, provider: prov.id };
     }
   }
 
+  // 2. Identify provider family
   const isClaude = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('claude') || targetModel.toLowerCase().includes('opus') || targetModel.toLowerCase().includes('sonnet') || targetModel.toLowerCase().includes('haiku') || targetModel.toLowerCase().includes('fable'));
   const isGpt = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('gpt') || targetModel.toLowerCase().includes('openai') || targetModel.toLowerCase().includes('codex') || targetModel.toLowerCase().includes('o3') || targetModel.toLowerCase().includes('terra') || targetModel.toLowerCase().includes('luna'));
 
@@ -135,6 +309,72 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
     provider = 'antigravity';
   }
 
+  // 3. Direct Cloud API Routing (without LocalBridge)
+  // Determine if direct cloud API should be used:
+  // - Mode is explicitly 'api', OR
+  // - LocalBridge is offline/unreachable, OR
+  const provMode = provider === 'antigravity' ? (settings.antigravityMode || 'api') : (provider === 'claude' ? (settings.claudeMode || 'api') : (settings.openaiMode || 'api'));
+  const provKey = provider === 'antigravity' ? settings.geminiApiKey?.trim() : (provider === 'claude' ? settings.anthropicApiKey?.trim() : settings.openaiApiKey?.trim());
+
+  const useDirectApi = provMode === 'api' || (!bridgeOnline && provKey) || (provKey && provMode !== 'cli');
+
+  if (useDirectApi) {
+    if (provider === 'antigravity') {
+      const apiKey = settings.geminiApiKey?.trim();
+      if (!apiKey) {
+        throw new Error('⚠️ Google Gemini API Key no configurada. Por favor abre Configuración (engranaje) en Autono e ingresa tu Gemini API Key para consultar a Gemini directamente sin Local Bridge.');
+      }
+      return {
+        url: CLOUD_ENDPOINTS.gemini,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        model: mapToGeminiApiModel(targetModel),
+        provider: 'gemini',
+        isDirectCloud: true,
+      };
+    }
+
+    if (provider === 'claude') {
+      const apiKey = settings.anthropicApiKey?.trim();
+      if (!apiKey) {
+        throw new Error('⚠️ Anthropic Claude API Key no configurada. Por favor abre Configuración (engranaje) en Autono e ingresa tu Anthropic API Key para consultar a Claude directamente sin Local Bridge.');
+      }
+      return {
+        url: CLOUD_ENDPOINTS.claude,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        model: mapToAnthropicApiModel(targetModel),
+        provider: 'claude',
+        isDirectCloud: true,
+        isDirectAnthropic: true,
+      };
+    }
+
+    if (provider === 'openai') {
+      const apiKey = settings.openaiApiKey?.trim();
+      if (!apiKey) {
+        throw new Error('⚠️ OpenAI API Key no configurada. Por favor abre Configuración (engranaje) en Autono e ingresa tu OpenAI API Key para consultar a ChatGPT directamente sin Local Bridge.');
+      }
+      return {
+        url: CLOUD_ENDPOINTS.openai,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        model: mapToOpenAiApiModel(targetModel),
+        provider: 'openai',
+        isDirectCloud: true,
+      };
+    }
+  }
+
+  // 4. Local Bridge Routing
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer sk-antigravity',
@@ -162,7 +402,57 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
 }
 
 async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
-  const { url, headers, provider, cleanBase } = endpointInfo;
+  const { url, headers, provider, cleanBase, isDirectCloud, isDirectAnthropic } = endpointInfo;
+
+  // Handle direct Anthropic Claude API
+  if (isDirectAnthropic) {
+    const antPayload = convertOpenAIToAnthropic(bodyPayload);
+    const antRes = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(antPayload),
+      signal,
+    });
+
+    if (!antRes.ok) {
+      const errText = await antRes.text().catch(() => '');
+      let errMsg = `Anthropic API Error ${antRes.status}`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error?.message) errMsg = errJson.error.message;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    if (!bodyPayload.stream) {
+      // Non-streaming response for Anthropic
+      const antJson = await antRes.json();
+      const contentText = (antJson.content || []).map(c => c.text || '').join('');
+      const compatJson = {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: contentText,
+            },
+          },
+        ],
+      };
+      return new Response(JSON.stringify(compatJson), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Streaming response: transform Anthropic SSE to OpenAI SSE
+    const transformedStream = transformAnthropicStreamToOpenAI(antRes.body);
+    return new Response(transformedStream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }
+
+  // Standard OpenAI-compatible format (Direct Gemini, Direct OpenAI, Custom Providers, or Bridge)
   let res = await fetch(url, {
     method: 'POST',
     headers,
@@ -170,8 +460,8 @@ async function fetchInferenceWithFallback(endpointInfo, bodyPayload, signal) {
     signal,
   });
 
-  // Seamless fallback to root /v1/chat/completions if the running bridge instance does not yet have /{provider}/ routes
-  if (!res.ok && res.status === 404 && provider && cleanBase && url.includes(`/${provider}/`)) {
+  // Seamless fallback to root /v1/chat/completions if local bridge lacks /{provider}/ prefix
+  if (!res.ok && res.status === 404 && !isDirectCloud && provider && cleanBase && url.includes(`/${provider}/`)) {
     const fallbackUrl = `${cleanBase}/v1/chat/completions`;
     const fallbackRes = await fetch(fallbackUrl, {
       method: 'POST',
@@ -2078,7 +2368,7 @@ async function executeClickAction(tabId, target) {
           return `Element not found: "${targetSelector}". Continuing with an alternative action.`;
         }
 
-        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
 
         // Highlight ring animation for visual feedback
         const prevOutline = el.style.outline;
@@ -2247,7 +2537,7 @@ async function executeTypeAction(tabId, target, value) {
           return `Text field not found: "${targetSelector}". Continuing with another action.`;
         }
 
-        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
         el.focus();
         if (typeof el.select === 'function') {
           try { el.select(); } catch (e) {}
@@ -2565,11 +2855,11 @@ async function handleMcpAction(actionItem, bridgeUrl) {
             let finalContent = '';
             const listener = (msg) => {
               if (msg.taskId === taskId) {
-                if (msg.type === 'token') {
-                  finalContent += msg.token;
-                } else if (msg.type === 'chat_complete') {
+                if (msg.type === 'stream_chunk' || msg.type === 'token') {
+                  finalContent += (msg.chunk || msg.token || '');
+                } else if (msg.type === 'task_complete' || msg.type === 'chat_complete') {
                   removeInternalListener(listener);
-                  resolve({ taskId, content: finalContent || msg.content });
+                  resolve({ taskId, content: finalContent || msg.fullAnswer || msg.content });
                 } else if (msg.type === 'task_error') {
                   removeInternalListener(listener);
                   reject(new Error(msg.error || 'Chat task failed'));
@@ -2707,6 +2997,8 @@ chrome.runtime.onConnect.addListener((port) => {
           intro: runningTask.intro || '',
           fullAnswer: runningTask.fullAnswer || '',
           steps: runningTask.steps || [],
+          pausedReason: runningTask.pausedReason || null,
+          savedTabUrl: runningTask.savedTabUrl || null,
         } : null,
       });
     })();
@@ -2781,8 +3073,13 @@ chrome.runtime.onConnect.addListener((port) => {
           }
 
           case 'cancel_task': {
-            if (runningTask && runningTask.abortController) {
-              runningTask.abortController.abort();
+            if (runningTask) {
+              if (runningTask.abortController) {
+                runningTask.abortController.abort();
+              }
+              if (typeof runningTask.stepWaitResolver === 'function') {
+                runningTask.stepWaitResolver('aborted');
+              }
             }
             break;
           }
@@ -2916,6 +3213,37 @@ async function openOrFocusPopupWindow() {
 
 // ─── Selection Ask, Shortcuts & Fragment Picker Listeners from Web Pages ─────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'quick_inference') {
+    (async () => {
+      try {
+        const { prompt, messages, model, explicitProvider, temperature, maxTokens } = message;
+        const settings = await getSettings();
+        const targetModel = model || settings.selectedModel || DEFAULT_MODEL;
+        const endpointInfo = await resolveInferenceEndpoint(targetModel, settings.bridgeUrl, explicitProvider);
+        const msgs = messages || [{ role: 'user', content: prompt || '' }];
+        const payload = {
+          model: endpointInfo.model,
+          messages: msgs,
+          temperature: temperature !== undefined ? temperature : 0.2,
+          stream: false,
+          max_tokens: maxTokens || 4096,
+        };
+        const res = await fetchInferenceWithFallback(endpointInfo, payload, null);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          sendResponse?.({ success: false, error: `Error ${res.status}: ${errText}` });
+          return;
+        }
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        sendResponse?.({ success: true, text });
+      } catch (err) {
+        sendResponse?.({ success: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === 'CHECK_ACTIVE_TASK') {
     const tabId = sender.tab?.id;
     const isActive = runningTask && runningTask.status === 'running' && (runningTask.tabId === tabId);
@@ -2936,6 +3264,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === 'user_intervention') {
     handleUserIntervention(message.text);
+    sendResponse?.({ success: true });
+    return true;
+  }
+
+  if (message?.type === 'cancel_task') {
+    if (runningTask) {
+      if (runningTask.abortController) {
+        runningTask.abortController.abort();
+      }
+      if (typeof runningTask.stepWaitResolver === 'function') {
+        runningTask.stepWaitResolver('aborted');
+      }
+    }
     sendResponse?.({ success: true });
     return true;
   }

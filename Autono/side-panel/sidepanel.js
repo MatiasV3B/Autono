@@ -120,16 +120,17 @@ marked.setOptions({
   let currentIntroText = '';
   let allSessions = [];
   let lastUserPrompt = '';
+  let lastAttachedItems = [];
   let lastSearchSources = [];
   let latestModelSuggestions = [];
   let currentGridOpacity = 0.065;
   let currentSquareSize = 44;
   let currentTrailDecay = 0.022;
-  let currentAntigravityMode = 'desktop';
+  let currentAntigravityMode = 'api';
   let currentGeminiApiKey = '';
-  let currentClaudeMode = 'desktop';
+  let currentClaudeMode = 'api';
   let currentAnthropicApiKey = '';
-  let currentOpenaiMode = 'desktop';
+  let currentOpenaiMode = 'api';
   let currentOpenaiApiKey = '';
   try {
     const savedAntigravityMode = localStorage.getItem('antigravity_antigravity_mode');
@@ -186,6 +187,39 @@ marked.setOptions({
         </g>
       </svg>`,
       models: [
+        {
+          id: 'gemini-2.5-flash',
+          name: 'Gemini 2.5 Flash',
+          desc: 'High-speed official Google Gemini model for rapid web and text analysis.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 9, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
+          usageGroup: 'gemini',
+        },
+        {
+          id: 'gemini-2.5-pro',
+          name: 'Gemini 2.5 Pro',
+          desc: 'Supreme analytical depth and frontier reasoning from Google AI Studio.',
+          contextWindow: '2.0M tokens',
+          metrics: { intelligence: 9, speed: 4, context: 10, efficiency: 7 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'high'],
+          defaultThinking: 'high',
+          usageGroup: 'gemini',
+        },
+        {
+          id: 'gemini-2.0-flash',
+          name: 'Gemini 2.0 Flash',
+          desc: 'Fast, lightweight multimodal model for instant web interactions.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 9, context: 10, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
+          usageGroup: 'gemini',
+        },
         {
           id: 'gemini-3.8-flash',
           name: 'Gemini 3.8 Flash',
@@ -248,6 +282,39 @@ marked.setOptions({
       name: 'Claude',
       iconSvg: `<img src="../assets/claude-icon-32.png" width="16" height="16" style="object-fit:contain;vertical-align:middle;border-radius:3px;" alt="Claude">`,
       models: [
+        {
+          id: 'claude-3-7-sonnet-20250219',
+          name: 'Claude 3.7 Sonnet',
+          desc: 'Anthropic hybrid reasoning model with state-of-the-art coding and extended thinking.',
+          contextWindow: '200K tokens',
+          metrics: { intelligence: 9, speed: 8, context: 8, efficiency: 7 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'claude-3-5-sonnet-20241022',
+          name: 'Claude 3.5 Sonnet',
+          desc: 'Frontier code generation, deep comprehension and multi-turn workflows.',
+          contextWindow: '200K tokens',
+          metrics: { intelligence: 8, speed: 8, context: 8, efficiency: 7 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'claude-3-5-haiku-20241022',
+          name: 'Claude 3.5 Haiku',
+          desc: 'Instant-speed lightweight response for browser actions and quick chats.',
+          contextWindow: '200K tokens',
+          metrics: { intelligence: 7, speed: 9, context: 7, efficiency: 9 },
+          caps: ['reasoning', 'image'],
+          thinking: ['fast', 'thinking'],
+          defaultThinking: 'fast',
+          usageGroup: 'claude_gpt',
+        },
         {
           id: 'claude-sonnet-5-5',
           name: 'Claude Sonnet 5.5',
@@ -323,6 +390,39 @@ marked.setOptions({
         <path fill="#ffffff" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1683a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4947zm-9.66-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1402-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.02 1.1683a.0757.0757 0 0 1-.071 0l-4.8303-2.7866A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1636a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
       </svg>`,
       models: [
+        {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          desc: 'Omni-model flagship for high-intelligence multimodal tasks and vision.',
+          contextWindow: '128K tokens',
+          metrics: { intelligence: 9, speed: 8, context: 7, efficiency: 7 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'gpt-4o-mini',
+          name: 'GPT-4o Mini',
+          desc: 'Fast, cost-effective vision and text model for nimble navigation.',
+          contextWindow: '128K tokens',
+          metrics: { intelligence: 7, speed: 9, context: 7, efficiency: 9 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
+          id: 'o3-mini',
+          name: 'o3-mini',
+          desc: 'Specialized STEM reasoning, competitive math and code generation.',
+          contextWindow: '200K tokens',
+          metrics: { intelligence: 9, speed: 7, context: 8, efficiency: 8 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high'],
+          defaultThinking: 'high',
+          usageGroup: 'claude_gpt',
+        },
         {
           id: 'gpt-6-astra',
           name: 'GPT-6 Astra',
@@ -743,8 +843,14 @@ marked.setOptions({
 
     retryBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
+      const parentRow = errorCard?.closest('.message-row');
+      if (parentRow) parentRow.remove();
       if (lastUserPrompt && promptInput) {
         promptInput.value = lastUserPrompt;
+        if (Array.isArray(lastAttachedItems) && lastAttachedItems.length > 0) {
+          attachedItems = [...lastAttachedItems];
+          renderAttachedChips();
+        }
         handleInputStateChange();
         handleSend();
       }
@@ -752,7 +858,9 @@ marked.setOptions({
 
     dismissBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
-      errorCard?.remove();
+      const parentRow = errorCard?.closest('.message-row');
+      if (parentRow) parentRow.remove();
+      else errorCard?.remove();
     });
   }
 
@@ -774,13 +882,14 @@ marked.setOptions({
           }
         }
 
-        // Restore task if it was running in background
-        if (msg.runningTask && msg.runningTask.status === 'running') {
+        // Restore task if it was running or paused in background
+        if (msg.runningTask && (msg.runningTask.status === 'running' || msg.runningTask.status === 'paused')) {
           currentTaskId = msg.runningTask.taskId;
           currentSessionId = msg.runningTask.sessionId;
           isGenerating = true;
           toggleInputState(true);
-          showLiveActivity(msg.runningTask.mode === 'cowork' ? '⚡ Cowork running...' : '✦ Generating response...');
+          const isPaused = msg.runningTask.status === 'paused';
+          showLiveActivity(isPaused ? '⏸ Task paused' : (msg.runningTask.mode === 'cowork' ? '⚡ Cowork running...' : '✦ Generating response...'));
           if (msg.runningTask.mode === 'chat') {
             if (msg.runningTask.fullAnswer) {
               currentStreamingBubble = createMessageRow('assistant', msg.runningTask.fullAnswer);
@@ -795,6 +904,31 @@ marked.setOptions({
             currentPlanData = msg.runningTask.plan || null;
             currentIntroText = msg.runningTask.intro || '';
             currentCoworkBubble = createMessageRow('assistant', '', null, null, currentPlanData, currentIntroText);
+            if (isPaused && currentCoworkBubble) {
+              const pauseCardId = 'resume-btn-' + Date.now();
+              const pauseBanner = document.createElement('div');
+              pauseBanner.className = 'session-paused-banner';
+              pauseBanner.style.cssText = 'margin:12px 0;padding:12px 14px;background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.35);border-radius:10px;color:#fef08a;font-size:12.5px;';
+              pauseBanner.innerHTML = `
+                <div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+                  <span>⏸</span> <span>Session Paused</span>
+                </div>
+                <div style="color:#d1d5db;font-size:12px;margin-bottom:10px;line-height:1.4;">
+                  ${msg.runningTask.pausedReason === 'tab_closed' ? 'The linked work tab was closed.' : 'Execution has been paused.'}
+                  ${msg.runningTask.savedTabUrl ? `<br>Saved URL: <a href="${escapeHtml(msg.runningTask.savedTabUrl)}" target="_blank" style="color:#38bdf8;word-break:break-all;">${escapeHtml(msg.runningTask.savedTabUrl)}</a>` : ''}
+                </div>
+                <button type="button" id="${pauseCardId}" style="background:#0284c7;color:#ffffff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;transition:background 0.15s ease;">
+                  <span>▶</span> <span>Resume & Open Tab</span>
+                </button>
+              `;
+              currentCoworkBubble.appendChild(pauseBanner);
+              setTimeout(() => {
+                document.getElementById(pauseCardId)?.addEventListener('click', () => {
+                  sendPortMessage({ type: 'resume_cowork_task' });
+                  pauseBanner.remove();
+                });
+              }, 50);
+            }
           }
           scrollToBottom(true);
         }
@@ -834,6 +968,9 @@ marked.setOptions({
         break;
 
       case 'stream_chunk':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) {
+          break;
+        }
         if (!currentStreamingBubble) {
           currentStreamingBubble = createMessageRow('assistant', '');
         }
@@ -851,6 +988,9 @@ marked.setOptions({
         break;
 
       case 'cowork_plan_created':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) {
+          break;
+        }
         currentPlanData = msg.plan;
         if (msg.intro) {
           currentIntroText = msg.intro;
@@ -868,6 +1008,9 @@ marked.setOptions({
         break;
 
       case 'cowork_plan_update':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) {
+          break;
+        }
         if (msg.plan) {
           currentPlanData = msg.plan;
           if (msg.intro) {
@@ -896,10 +1039,17 @@ marked.setOptions({
         break;
 
       case 'task_complete':
-        isGenerating = false;
-        currentTaskId = null;
-        toggleInputState(false);
-        hideLiveActivity();
+        if (msg.taskId === currentTaskId) {
+          isGenerating = false;
+          currentTaskId = null;
+          toggleInputState(false);
+          hideLiveActivity();
+        }
+
+        if (msg.sessionId && msg.sessionId !== currentSessionId) {
+          // Task completed in another background session, saved by background worker
+          break;
+        }
 
         if (msg.mode === 'chat' && currentStreamingBubble) {
           currentStreamingBubble.innerHTML = renderMarkdown(msg.fullAnswer, false);
@@ -932,18 +1082,23 @@ marked.setOptions({
         break;
 
       case 'cowork_step_start':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showLiveActivity(`⚡ Step ${msg.stepNumber}: ${msg.status || 'Analyzing elements...'}`);
         break;
 
       case 'cowork_step_action':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showLiveActivity(`⚡ Step ${msg.stepNumber}: [${(msg.plan?.action || '').toUpperCase()}] ${msg.plan?.description || ''}`);
         break;
 
       case 'task_aborted':
-        isGenerating = false;
-        currentTaskId = null;
-        toggleInputState(false);
-        hideLiveActivity();
+        if (msg.taskId === currentTaskId) {
+          isGenerating = false;
+          currentTaskId = null;
+          toggleInputState(false);
+          hideLiveActivity();
+        }
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         if (currentStreamingBubble) {
           currentStreamingBubble.innerHTML = currentStreamingText ? renderMarkdown(currentStreamingText, false) : '*[Generation cancelled]*';
           currentStreamingBubble = null;
@@ -962,10 +1117,13 @@ marked.setOptions({
         break;
 
       case 'task_error':
-        isGenerating = false;
-        currentTaskId = null;
-        toggleInputState(false);
-        hideLiveActivity();
+        if (msg.taskId === currentTaskId) {
+          isGenerating = false;
+          currentTaskId = null;
+          toggleInputState(false);
+          hideLiveActivity();
+        }
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         const errorCardHtml = createAiErrorCard(msg.error || 'Unexpected error occurred.');
         if (currentStreamingBubble) {
           currentStreamingBubble.innerHTML = errorCardHtml;
@@ -985,6 +1143,7 @@ marked.setOptions({
         break;
 
       case 'cowork_task_paused':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showLiveActivity('⏸ Task paused');
         showToast('⏸ Session paused (linked tab closed or user pause)');
         if (currentCoworkBubble) {
@@ -2039,24 +2198,95 @@ marked.setOptions({
     });
   }
 
-  // Reload Models from Bridge / CLI Button
+  // Reload Models from Cloud APIs & Bridge Button
   const refreshModelsBtn = document.getElementById('refreshModelsBtn');
   if (refreshModelsBtn) {
     refreshModelsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       refreshModelsBtn.classList.add('spinning');
       const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-      try {
-        // Trigger model refresh on Bridge asynchronously
-        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(12000) }).catch(() => null);
+      let loadedFromCloud = false;
 
-        // Fetch fresh model catalog from Bridge
-        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(12000) });
+      // 1. Fetch Google Gemini models directly via Google AI Studio API if API Key is configured
+      const geminiKey = (settingGeminiApiKey?.value || currentGeminiApiKey || '').trim();
+      if (geminiKey) {
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, {
+            signal: AbortSignal.timeout(6000),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const models = data.models || [];
+            models.forEach((m) => {
+              const name = (m.name || '').replace('models/', '');
+              if (!name) return;
+              if (name.includes('gemini')) {
+                const exists = PROVIDER_DATA.gemini.models.some(x => x.id === name);
+                if (!exists) {
+                  PROVIDER_DATA.gemini.models.push({
+                    id: name,
+                    name: m.displayName || name,
+                    desc: m.description || 'Google Gemini Direct Cloud Model',
+                    contextWindow: `${Math.round((m.inputTokenLimit || 1000000) / 1000)}K tokens`,
+                    metrics: { intelligence: 8, speed: 8, context: 10, efficiency: 7 },
+                    caps: ['reasoning', 'image'],
+                    thinking: ['low', 'medium', 'high'],
+                    defaultThinking: 'medium',
+                    usageGroup: 'gemini',
+                  });
+                }
+              }
+            });
+            loadedFromCloud = true;
+          }
+        } catch (geminiErr) {
+          console.log('Direct Gemini models fetch note:', geminiErr);
+        }
+      }
+
+      // 2. Fetch OpenAI models directly if OpenAI API Key is configured
+      const openaiKey = (settingOpenaiApiKey?.value || currentOpenaiApiKey || '').trim();
+      if (openaiKey) {
+        try {
+          const res = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${openaiKey}` },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const list = data.data || [];
+            list.filter(m => m.id && (m.id.startsWith('gpt-') || m.id.startsWith('o1') || m.id.startsWith('o3'))).forEach((m) => {
+              const exists = PROVIDER_DATA.chatgpt.models.some(x => x.id === m.id);
+              if (!exists) {
+                PROVIDER_DATA.chatgpt.models.push({
+                  id: m.id,
+                  name: m.id.toUpperCase(),
+                  desc: 'OpenAI Direct Cloud Model',
+                  contextWindow: '128K tokens',
+                  metrics: { intelligence: 8, speed: 8, context: 8, efficiency: 7 },
+                  caps: ['reasoning', 'image'],
+                  thinking: ['low', 'medium', 'high'],
+                  defaultThinking: 'medium',
+                  usageGroup: 'claude_gpt',
+                });
+              }
+            });
+            loadedFromCloud = true;
+          }
+        } catch (openaiErr) {
+          console.log('Direct OpenAI models fetch note:', openaiErr);
+        }
+      }
+
+      // 3. Also check Local Bridge if running
+      let bridgeSucceeded = false;
+      try {
+        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(4000) }).catch(() => null);
+        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(4000) });
         if (res.ok) {
           const data = await res.json();
           const fetchedList = data.data || data.models || [];
           if (Array.isArray(fetchedList) && fetchedList.length > 0) {
-            let addedCount = 0;
             fetchedList.forEach((m) => {
               const mId = m.id || m.model || m;
               if (typeof mId !== 'string') return;
@@ -2076,25 +2306,28 @@ marked.setOptions({
                   defaultThinking: 'medium',
                   usageGroup: isClaude || isOpenAI ? 'claude_gpt' : 'gemini',
                 });
-                addedCount++;
               }
             });
-            showToast('✅ Models refreshed from CLIs & Bridge');
-          } else {
-            showToast('✅ Models up to date');
+            bridgeSucceeded = true;
           }
-        } else {
-          showToast('✅ Models catalog updated');
         }
-      } catch (err) {
-        console.warn('Refresh models error:', err);
-        const isTimeout = err?.name === 'TimeoutError' || String(err).includes('AbortError');
-        showToast(isTimeout ? '⚠️ Timeout connecting to Bridge. Retrying...' : '⚠️ Could not connect to Bridge to reload models');
+      } catch (bridgeErr) {
+        // Bridge is offline; perfectly normal when using Direct APIs
       } finally {
         setTimeout(() => {
           refreshModelsBtn.classList.remove('spinning');
         }, 400);
         renderModelPickerRows(modelSearchInput.value);
+      }
+
+      if (bridgeSucceeded && loadedFromCloud) {
+        showToast('✅ Modelos actualizados desde APIs en la nube y Bridge');
+      } else if (bridgeSucceeded) {
+        showToast('✅ Modelos actualizados desde Local Bridge');
+      } else if (loadedFromCloud) {
+        showToast('✅ Modelos actualizados directamente desde APIs en la nube');
+      } else {
+        showToast('✅ Catálogo de modelos listo');
       }
     });
   }
@@ -2516,6 +2749,7 @@ marked.setOptions({
     let searchCardHtml = '';
 
     lastUserPrompt = text;
+    lastAttachedItems = Array.isArray(attachedItems) ? [...attachedItems] : [];
     lastSearchSources = [];
 
     // If Search is active, perform TinyFish search!
@@ -3096,6 +3330,16 @@ marked.setOptions({
   let historySearchQuery = '';
 
   function startNewChat() {
+    if (isGenerating) {
+      currentStreamingBubble = null;
+      currentCoworkBubble = null;
+      currentPlanData = null;
+      currentIntroText = '';
+      isGenerating = false;
+      currentTaskId = null;
+      toggleInputState(false);
+      hideLiveActivity();
+    }
     currentSessionId = generateId();
     messagesContainer.innerHTML = '';
     welcomeHero.classList.remove('hidden');
@@ -3256,6 +3500,16 @@ marked.setOptions({
         if (e.target.closest('.session-action-btn') || e.target.closest('.session-folder-tag') || e.target.tagName === 'INPUT') {
           return;
         }
+        if (isGenerating) {
+          currentStreamingBubble = null;
+          currentCoworkBubble = null;
+          currentPlanData = null;
+          currentIntroText = '';
+          isGenerating = false;
+          currentTaskId = null;
+          toggleInputState(false);
+          hideLiveActivity();
+        }
         currentSessionId = s.id;
         renderSessionMessages(s.messages);
         sendPortMessage({ type: 'set_active_session', sessionId: s.id });
@@ -3326,10 +3580,14 @@ marked.setOptions({
       const delBtn = item.querySelector('.session-action-btn.delete');
       delBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        sendPortMessage({ type: 'delete_session', sessionId: s.id });
-        allSessions = allSessions.filter(x => x.id !== s.id);
+        const deletedId = s.id;
+        sendPortMessage({ type: 'delete_session', sessionId: deletedId });
+        allSessions = allSessions.filter(x => x.id !== deletedId);
         renderHistoryList();
         showToast('Chat deleted');
+        if (currentSessionId === deletedId) {
+          startNewChat();
+        }
       });
 
       sessionsList.appendChild(item);
@@ -5850,36 +6108,32 @@ You are a world-class principal software engineer.
     btwMessagesContainer.scrollTop = btwMessagesContainer.scrollHeight;
 
     try {
-      const bridgeUrl = (settingBridgeUrl?.value || 'http://127.0.0.1:8765').trim().replace(/\/+$/, '');
       const provider = activeModelTab || 'antigravity';
-      const resp = await fetch(`${bridgeUrl}/${provider}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sk-antigravity',
-          'x-provider': provider,
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an external sidecar AI assistant ("By The Way"). The user is asking a quick question while working on an isolated task. Answer accurately, concisely, and helpfully in English.',
-            },
-            { role: 'user', content: q },
-          ],
-          model: currentModel || 'gemini-3.8-flash-medium',
-          temperature: 0.7,
-        }),
+      chrome.runtime.sendMessage({
+        type: 'quick_inference',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an external sidecar AI assistant ("By The Way"). The user is asking a quick question while working on an isolated task. Answer accurately, concisely, and helpfully in English.',
+          },
+          { role: 'user', content: q },
+        ],
+        model: currentModel || 'gemini-3.8-flash-medium',
+        explicitProvider: provider,
+        temperature: 0.7,
+      }, (res) => {
+        if (chrome.runtime.lastError) {
+          botBubble.textContent = `Error: ${chrome.runtime.lastError.message}`;
+          return;
+        }
+        if (res && res.success) {
+          const reply = res.text || 'Response completed.';
+          botBubble.innerHTML = escapeHtml(reply).replace(/\n/g, '<br>');
+        } else {
+          botBubble.textContent = res?.error || 'Could not connect to AI provider.';
+        }
+        btwMessagesContainer.scrollTop = btwMessagesContainer.scrollHeight;
       });
-
-      if (resp.ok) {
-        const data = await resp.json();
-        const reply = (data.choices && data.choices[0]?.message?.content) || data.reply || data.content || data.response || 'Response completed.';
-        botBubble.innerHTML = escapeHtml(reply).replace(/\n/g, '<br>');
-      } else {
-        const errTxt = await resp.text().catch(() => '');
-        botBubble.textContent = `External assistant error (${resp.status}): ${errTxt || 'Could not connect to bridge.'}`;
-      }
     } catch (err) {
       botBubble.textContent = `External assistant error: ${err.message || 'Unable to connect to bridge.'}`;
     }
@@ -7290,13 +7544,13 @@ You are a world-class principal software engineer.
       html = escapeHtml(processed).replace(/\n/g, '<br>');
     }
 
-    // 7. Restore Math Tokens in HTML
+    // 7. Restore Math Tokens in HTML safely without regex substitution collision
     for (const [id, val] of mathMap.entries()) {
       const pWrapped = `<p>${id}</p>`;
       if (html.includes(pWrapped)) {
-        html = html.replace(pWrapped, val);
+        html = html.replaceAll(pWrapped, () => val);
       } else {
-        html = html.replace(id, val);
+        html = html.replaceAll(id, () => val);
       }
     }
 
@@ -7352,12 +7606,40 @@ You are a world-class principal software engineer.
     });
   }
 
+  function sanitizeTableHtml(rawHtml) {
+    if (!rawHtml || typeof rawHtml !== 'string') return '';
+    const temp = document.createElement('div');
+    temp.innerHTML = rawHtml;
+
+    // Disallow dangerous elements completely
+    const forbiddenTags = ['script', 'iframe', 'object', 'embed', 'link', 'style', 'form', 'input', 'button', 'svg', 'math'];
+    forbiddenTags.forEach(tag => {
+      temp.querySelectorAll(tag).forEach(el => el.remove());
+    });
+
+    // Remove all event handler attributes and unsafe hrefs/srcs
+    temp.querySelectorAll('*').forEach(el => {
+      const attrs = Array.from(el.attributes);
+      for (const attr of attrs) {
+        const name = attr.name.toLowerCase();
+        const val = attr.value.trim().toLowerCase();
+        if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('data:text/html')) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+
+    return temp.innerHTML;
+  }
+
   function openTableInFullTab(tableHtml) {
+    const cleanTableHtml = sanitizeTableHtml(tableHtml);
     const pageHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Antigravity — Table View</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;">
+  <title>Autono — Table View</title>
   <style>
     body {
       background: #0d0e11;
@@ -7405,11 +7687,11 @@ You are a world-class principal software engineer.
 </head>
 <body>
   <div class="header">
-    <h2>Antigravity Table Viewer</h2>
+    <h2>Autono Table Viewer</h2>
     <span style="color:#94a3b8;font-size:13px;">Full View</span>
   </div>
   <div class="table-wrapper">
-    ${tableHtml}
+    ${cleanTableHtml}
   </div>
 </body>
 </html>`;
@@ -7700,8 +7982,7 @@ You are a world-class principal software engineer.
     showToast('✦ Enhancing prompt for maximum performance...');
 
     try {
-      const baseUrl = (settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-      const targetModel = currentModel || 'gemini-3.8-flash-medium';
+      const targetModel = currentModel || 'gemini-2.5-flash';
 
       const promptOptimizationInstruction = `You are a world-class prompt engineering expert. 
 Your task is to take the user's rough query or task description and transform it into a high-performance, well-structured, production-grade LLM prompt.
@@ -7713,30 +7994,28 @@ Follow these strict guidelines:
 4. Return ONLY the enhanced prompt text itself. Do NOT include any intro ("Here is the enhanced prompt:"), meta-commentary, explanations, quotes, or markdown backticks enclosing the entire prompt.`;
 
       const provider = activeModelTab || 'antigravity';
-      const response = await fetch(`${baseUrl}/${provider}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sk-antigravity',
-          'x-provider': provider,
-        },
-        body: JSON.stringify({
-          model: targetModel,
+      const enhancedText = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: 'quick_inference',
           messages: [
             { role: 'system', content: promptOptimizationInstruction },
             { role: 'user', content: `Enhance and optimize this prompt for peak LLM performance:\n\n${rawText}` },
           ],
+          model: targetModel,
+          explicitProvider: provider,
           temperature: 0.3,
-          max_tokens: 4096,
-        }),
+          maxTokens: 4096,
+        }, (res) => {
+          if (chrome.runtime.lastError) {
+            return reject(new Error(chrome.runtime.lastError.message));
+          }
+          if (res && res.success) {
+            resolve(res.text?.trim());
+          } else {
+            reject(new Error(res?.error || 'Empty response from model'));
+          }
+        });
       });
-
-      if (!response.ok) {
-        throw new Error(`Inference HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      const enhancedText = data?.choices?.[0]?.message?.content?.trim();
 
       if (enhancedText && promptInput) {
         promptInput.value = enhancedText;
@@ -7757,7 +8036,7 @@ Follow these strict guidelines:
       }
     } catch (err) {
       console.warn('Prompt enhancement failed:', err);
-      showToast(`Could not optimize prompt: ${err.message || 'Check bridge connection'}`);
+      showToast(`Could not optimize prompt: ${err.message || 'Check provider API connection'}`);
     } finally {
       if (promptEnhanceBtn) {
         promptEnhanceBtn.disabled = false;
