@@ -113,7 +113,7 @@ Verify it is running by opening `http://127.0.0.1:8765/health` in your browser: 
 ## 💡 How to Use
 
 ### 1. Opening Autono
-- Press the global keyboard shortcut: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd>
+- Press the global keyboard shortcut: <kbd>Alt</kbd> + <kbd>A</kbd> (**A** for **A**utono)
 - Or click the **Autono** icon on your Chrome extensions toolbar.
 
 ### 2. Choosing Your AI Model & Provider
@@ -149,7 +149,7 @@ When you modify source files or pull updates, reload the extension in Chrome:
 1. Open `chrome://extensions` in your browser.
 2. Locate the **Autono** card.
 3. Click the 🔄 **Reload** icon button on the card.
-4. If you have the Autono side panel open, close and reopen it (<kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd>).
+4. If you have the Autono side panel open, close and reopen it (<kbd>Alt</kbd> + <kbd>A</kbd>).
 5. Refresh active webpage tabs so the newly loaded content scripts re-attach cleanly.
 
 > [!TIP]
@@ -178,7 +178,7 @@ Double-click `Actualizar-AntigravityBridge.bat` in the Bridge folder (or run `./
 
 | Shortcut | Action |
 | :--- | :--- |
-| <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> | Toggle the Autono Side Panel |
+| <kbd>Alt</kbd> + <kbd>A</kbd> | Toggle the Autono Side Panel |
 | <kbd>Enter</kbd> | Send prompt / trigger agent goal |
 | <kbd>Shift</kbd> + <kbd>Enter</kbd> | Insert new line in prompt box |
 | <kbd>Esc</kbd> | Dismiss model picker / cancel element picker |
@@ -223,6 +223,17 @@ autono/
 ├── README.md                   # Project documentation
 └── SECURITY.md                 # Security vulnerability reporting policy
 ```
+
+---
+
+## 🔒 Security & Dependencies
+
+We do not claim Autono is "100% secure": no software is. What we do is audit it and say plainly what we find.
+
+- **Dependency audit.** Run `cd Autono && npm audit` at any time. The advisory *"source-map-js through 1.2.1 does not validate the line offsets of indexed source maps (event-loop denial of service)"* was fixed by updating to `source-map-js@1.2.2`.
+- **What still shows up.** The remaining notices (`braces`, `chokidar`, `micromatch`, `fast-glob`, `postcss-nested`, `postcss-selector-parser`, `tailwindcss`) all come from the **Tailwind CSS 3 build toolchain**. They are `devDependencies` used on a developer's machine while styling; `node scripts/build-dist.js` skips `node_modules`, so **none of them is packaged into or loaded by the extension in Chrome**. Clearing them completely needs a major upgrade to Tailwind 4, which is on the roadmap.
+- **Local Bridge.** The Model Bridge listens on `127.0.0.1` only (not reachable from other machines) and is installed in an isolated `uv` environment, so it does not modify your system Python. API keys you enter are stored in the extension's local storage and are only sent to the provider you choose or to your own local Bridge.
+- **Found something?** Please follow [SECURITY.md](SECURITY.md) and report it privately.
 
 ---
 

@@ -16,9 +16,9 @@
   "commands": {
     "_execute_action": {
       "suggested_key": {
-        "default": "Alt+Shift+C",
-        "windows": "Alt+Shift+C",
-        "mac": "Command+Shift+C"
+        "default": "Alt+A",
+        "windows": "Alt+A",
+        "mac": "Alt+A"
       },
       "description": "Open Auto Test"
     }
