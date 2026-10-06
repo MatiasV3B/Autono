@@ -4,23 +4,18 @@
  */
 
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
-const DEFAULT_MODEL = 'gemini-3.8-flash-medium';
+const DEFAULT_MODEL = 'gemini-3.8-flash';
 
 const PRELOADED_MODELS = [
-  { id: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
-  { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
-  { id: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
-  { id: 'gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash (Medium)' },
-  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
-  { id: 'gemini-3.7-flash-low', name: 'Gemini 3.7 Flash (Low)' },
-  { id: 'gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash (Medium)' },
-  { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)' },
-  { id: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' },
-  { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
-  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)' },
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
-  { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
-  { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+  { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+  { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6' },
+  { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B' },
 ];
 
 // In-memory state for fast access & live connections
@@ -1033,23 +1028,32 @@ async function checkBridgeHealth() {
 
 async function refreshModelsList(baseUrl) {
   try {
-    const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(8000) });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json.data) && json.data.length > 0) {
-        const filteredData = json.data.filter(m => {
-          const id = m.id.toLowerCase();
-          return !id.includes('4o') && !id.includes('gpt-4') && !id.includes('gpt-3.5') && !id.includes('o1');
-        });
-        const fetched = filteredData.map(m => ({
-          id: m.id,
-          name: m.display_name || m.name || m.id.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-        }));
+        const merged = [];
+        json.data.forEach(m => {
+          let mId = (m.id || '').trim();
+          if (!mId || m.owned_by?.includes('alias') || mId.includes('->')) return;
 
-        // Merge with preloaded friendly names
-        const merged = fetched.map(f => {
-          const pre = PRELOADED_MODELS.find(p => p.id === f.id);
-          return pre ? pre : f;
+          // Normalize effort suffixes to base IDs
+          let baseId = mId;
+          if (mId.endsWith('-high')) baseId = mId.slice(0, -5);
+          else if (mId.endsWith('-medium')) baseId = mId.slice(0, -7);
+          else if (mId.endsWith('-low')) baseId = mId.slice(0, -4);
+          else if (mId.endsWith('-thinking')) baseId = mId.slice(0, -9);
+
+          if (baseId === 'gpt-oss-120b') baseId = 'gpt-oss-120b-medium';
+
+          if (!merged.some(x => x.id === baseId)) {
+            const pre = PRELOADED_MODELS.find(p => p.id === baseId);
+            const cleanName = (m.display_name || m.name || baseId).replace(/\s*\((High|Medium|Low|Thinking)\)\s*$/i, '').trim();
+            merged.push({
+              id: baseId,
+              name: pre ? pre.name : cleanName,
+            });
+          }
         });
 
         // Add any missing preloaded

@@ -2108,10 +2108,10 @@ marked.setOptions({
       const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
       try {
         // Trigger model refresh on Bridge asynchronously
-        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(12000) }).catch(() => null);
+        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(15000) }).catch(() => null);
 
         // Fetch fresh model catalog from Bridge
-        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(12000) });
+        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(15000) });
         if (res.ok) {
           const data = await res.json();
           const fetchedList = data.data || data.models || [];
@@ -2120,20 +2120,62 @@ marked.setOptions({
             fetchedList.forEach((m) => {
               const mId = m.id || m.model || m;
               if (typeof mId !== 'string') return;
-              const isClaude = isClaudeModel(mId);
-              const isOpenAI = isOpenAIModel(mId);
+              // Skip raw alias references that map to other roots
+              if (m.owned_by?.includes('alias') || mId.includes('->')) return;
+
+              // Extract canonical base ID and thinking effort
+              let baseId = mId;
+              let effort = null;
+              if (mId.endsWith('-high')) {
+                baseId = mId.slice(0, -5);
+                effort = 'high';
+              } else if (mId.endsWith('-medium')) {
+                baseId = mId.slice(0, -7);
+                effort = 'medium';
+              } else if (mId.endsWith('-low')) {
+                baseId = mId.slice(0, -4);
+                effort = 'low';
+              } else if (mId.endsWith('-thinking')) {
+                baseId = mId.slice(0, -9);
+                effort = 'thinking';
+              }
+
+              // Preserve standard GPT-OSS ID
+              if (baseId === 'gpt-oss-120b') {
+                baseId = 'gpt-oss-120b-medium';
+              }
+
+              const isClaude = isClaudeModel(baseId);
+              const isOpenAI = isOpenAIModel(baseId);
               const targetGroup = isClaude ? PROVIDER_DATA.claude.models : (isOpenAI ? PROVIDER_DATA.chatgpt.models : PROVIDER_DATA.gemini.models);
-              const exists = targetGroup.some(x => x.id === mId);
-              if (!exists) {
+
+              // Check if canonical model already exists in target group
+              const existing = targetGroup.find((x) => x.id === baseId || x.id === mId);
+              if (existing) {
+                // Merge thinking options cleanly without duplicate model cards
+                if (Array.isArray(m.thinking)) {
+                  m.thinking.forEach((th) => {
+                    if (!existing.thinking.includes(th)) existing.thinking.push(th);
+                  });
+                } else if (effort && !existing.thinking.includes(effort)) {
+                  existing.thinking.push(effort);
+                }
+              } else {
+                // Create single clean base model card
+                const cleanName = (m.display_name || m.name || baseId).replace(/\s*\((High|Medium|Low|Thinking)\)\s*$/i, '').trim();
+                const thinkingOpts = Array.isArray(m.thinking) && m.thinking.length > 0
+                  ? [...m.thinking]
+                  : (effort ? [effort] : ['low', 'medium', 'high']);
+
                 targetGroup.push({
-                  id: mId,
-                  name: m.name || m.display_name || mId,
-                  desc: m.description || `Dynamic model loaded from ${isClaude ? 'Claude' : (isOpenAI ? 'OpenAI / Codex' : 'Antigravity')}`,
+                  id: baseId,
+                  name: cleanName || baseId,
+                  desc: m.desc || m.description || `Dynamic model loaded from ${isClaude ? 'Claude' : (isOpenAI ? 'OpenAI / Codex' : 'Antigravity')}`,
                   contextWindow: m.context_window || '1.0M tokens',
                   metrics: { intelligence: 8, speed: 7, context: 8, efficiency: 7 },
                   caps: ['reasoning', 'image'],
-                  thinking: ['low', 'medium', 'high'],
-                  defaultThinking: 'medium',
+                  thinking: thinkingOpts,
+                  defaultThinking: m.default_thinking || (thinkingOpts.includes('medium') ? 'medium' : thinkingOpts[0]),
                   usageGroup: isClaude || isOpenAI ? 'claude_gpt' : 'gemini',
                 });
                 addedCount++;
