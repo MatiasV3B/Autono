@@ -122,20 +122,16 @@ async function resolveInferenceEndpoint(modelName, defaultBase, explicitProvider
   }
 
   const isClaude = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('claude') || targetModel.toLowerCase().includes('opus') || targetModel.toLowerCase().includes('sonnet') || targetModel.toLowerCase().includes('haiku') || targetModel.toLowerCase().includes('fable'));
-  const isGpt = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('gpt') || targetModel.toLowerCase().includes('openai') || targetModel.toLowerCase().includes('codex') || targetModel.toLowerCase().includes('o3'));
+  const isGpt = typeof targetModel === 'string' && (targetModel.toLowerCase().includes('gpt') || targetModel.toLowerCase().includes('openai') || targetModel.toLowerCase().includes('codex') || targetModel.toLowerCase().includes('o3') || targetModel.toLowerCase().includes('terra') || targetModel.toLowerCase().includes('luna'));
 
-  let provider = explicitProvider;
-  if (!provider) {
-    if (isClaude) {
-      provider = 'claude';
-    } else if (isGpt) {
-      provider = 'openai';
-    } else {
-      provider = 'antigravity';
-    }
-  }
-  if (provider === 'cloud') provider = 'claude';
-  if (!['antigravity', 'claude', 'openai'].includes(provider)) {
+  let provider = null;
+  if (isClaude) {
+    provider = 'claude';
+  } else if (isGpt) {
+    provider = 'openai';
+  } else if (explicitProvider && ['antigravity', 'claude', 'openai'].includes(explicitProvider)) {
+    provider = explicitProvider;
+  } else {
     provider = 'antigravity';
   }
 

@@ -2047,15 +2047,16 @@ marked.setOptions({
       refreshModelsBtn.classList.add('spinning');
       const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
       try {
-        // Trigger model refresh on Bridge
-        await fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(3500) }).catch(() => null);
+        // Trigger model refresh on Bridge asynchronously
+        fetch(`${bridgeUrl}/api/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(12000) }).catch(() => null);
 
         // Fetch fresh model catalog from Bridge
-        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(3500) });
+        const res = await fetch(`${bridgeUrl}/v1/models`, { signal: AbortSignal.timeout(12000) });
         if (res.ok) {
           const data = await res.json();
           const fetchedList = data.data || data.models || [];
           if (Array.isArray(fetchedList) && fetchedList.length > 0) {
+            let addedCount = 0;
             fetchedList.forEach((m) => {
               const mId = m.id || m.model || m;
               if (typeof mId !== 'string') return;
@@ -2066,7 +2067,7 @@ marked.setOptions({
               if (!exists) {
                 targetGroup.push({
                   id: mId,
-                  name: m.name || mId,
+                  name: m.name || m.display_name || mId,
                   desc: m.description || `Dynamic model loaded from ${isClaude ? 'Claude' : (isOpenAI ? 'OpenAI / Codex' : 'Antigravity')}`,
                   contextWindow: m.context_window || '1.0M tokens',
                   metrics: { intelligence: 8, speed: 7, context: 8, efficiency: 7 },
@@ -2075,9 +2076,10 @@ marked.setOptions({
                   defaultThinking: 'medium',
                   usageGroup: isClaude || isOpenAI ? 'claude_gpt' : 'gemini',
                 });
+                addedCount++;
               }
             });
-            showToast('✅ Models refreshed from CLI & Bridge');
+            showToast('✅ Models refreshed from CLIs & Bridge');
           } else {
             showToast('✅ Models up to date');
           }
@@ -2086,7 +2088,8 @@ marked.setOptions({
         }
       } catch (err) {
         console.warn('Refresh models error:', err);
-        showToast('⚠️ Could not connect to Bridge to reload models');
+        const isTimeout = err?.name === 'TimeoutError' || String(err).includes('AbortError');
+        showToast(isTimeout ? '⚠️ Timeout connecting to Bridge. Retrying...' : '⚠️ Could not connect to Bridge to reload models');
       } finally {
         setTimeout(() => {
           refreshModelsBtn.classList.remove('spinning');
@@ -2644,6 +2647,10 @@ marked.setOptions({
     }
     scrollToBottom();
 
+    const effectiveProvider = isClaudeModel(currentModel)
+      ? 'claude'
+      : (isOpenAIModel(currentModel) ? 'openai' : (activeModelTab || 'antigravity'));
+
     if (mode === 'chat') {
       sendPortMessage({
         type: 'start_chat',
@@ -2654,7 +2661,7 @@ marked.setOptions({
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
         includeScreenshot: !!screenshotToSend,
-        provider: activeModelTab || 'antigravity',
+        provider: effectiveProvider,
       });
     } else {
       sendPortMessage({
@@ -2665,7 +2672,7 @@ marked.setOptions({
         displayGoal: displayPrompt,
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
-        provider: activeModelTab || 'antigravity',
+        provider: effectiveProvider,
       });
     }
 
