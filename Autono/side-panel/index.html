@@ -12,6 +12,11 @@
     <div id="floatingPathsBackground" class="floating-paths-container" aria-hidden="true"></div>
 
     <!-- Top Bar: Model Picker & Actions -->
+    <div id="updateBanner" class="update-banner hidden" role="status">
+      <span class="update-banner-text" id="updateBannerText">New update available</span>
+      <button type="button" id="updateBannerBtn" class="update-banner-btn">Update</button>
+      <button type="button" id="updateBannerClose" class="update-banner-close" aria-label="Dismiss">×</button>
+    </div>
     <header class="top-nav">
       <div class="top-left">
         <!-- Model Picker Trigger (ChatGPT Style) -->
@@ -23,6 +28,12 @@
           <svg class="chevron-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
+        </button>
+
+        <!-- Engine: Local Terminal or API -->
+        <button id="providerBtn" class="provider-btn" type="button" title="Engine" aria-haspopup="true">
+          <span id="providerBtnIcon" class="provider-icon"></span>
+          <span>Engine</span>
         </button>
       </div>
 
@@ -52,15 +63,6 @@
           </svg>
         </button>
 
-        <!-- Sign In / Onboarding Button -->
-        <button id="authBtn" class="top-auth-btn" title="Sign In / Setup">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-            <circle cx="12" cy="7" r="4"></circle>
-          </svg>
-          <span id="topAuthLabel">Sign In</span>
-        </button>
-
         <!-- Settings Button -->
         <button id="settingsBtn" class="top-icon-btn" title="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -70,6 +72,8 @@
         </button>
       </div>
     </header>
+
+    <div id="providerPopover" class="provider-popover hidden"></div>
 
     <!-- ModelPicker Popover Component -->
     <div id="modelPickerPopover" class="model-picker-popover hidden">
@@ -137,7 +141,7 @@
         </div>
         <h2 class="welcome-heading" id="welcomeHeading">How can Antigravity help you today?</h2>
 
-        <!-- 3-Up Square Format Real-World Suggestions (3 top, 3 bottom) -->
+        <!-- Three starter suggestions -->
         <div class="chatgpt-suggestions-grid">
           <!-- Card 1: Distributed Systems & Full-Stack Architecture -->
           <button type="button" class="suggestion-grid-card" data-prompt="Design an enterprise-grade, real-time distributed collaborative whiteboard system using WebSockets, CRDTs (Yjs), Redis pub/sub, and PostgreSQL. Provide the architecture diagram in ASCII/Mermaid, database schemas, concurrency handling, and full TypeScript implementation of the syncing server.">
@@ -245,7 +249,7 @@
     <footer class="prompt-box-area">
       <!-- AI Model Thought Useful Prompt Suggestions Chips (Dynamically generated & clickable) -->
       <div id="aiPromptSuggestionsRow" class="ai-prompt-suggestions-row hidden">
-        <!-- 4 space-efficient chips injected here -->
+        <!-- 3 space-efficient chips injected here -->
       </div>
 
       <!-- Transient toast/notice banner (e.g. internal browser page warning) -->
@@ -336,6 +340,27 @@
         <div id="slashCommandsList" class="slash-commands-list"></div>
       </div>
 
+      <!-- Reasoning slider (opens from the Reasoning button) -->
+      <div id="reasoningPanel" class="reasoning-panel hidden">
+        <div class="reasoning-head"><span>Reasoning</span><strong id="reasoningCurrent"></strong></div>
+        <div id="reasoningSlider" class="reasoning-slider">
+          <div class="reasoning-track"><div id="reasoningFill" class="reasoning-fill"></div></div>
+          <div id="reasoningStops" class="reasoning-stops"></div>
+          <div id="reasoningThumb" class="reasoning-thumb" role="slider" tabindex="0" aria-label="Reasoning level"></div>
+        </div>
+        <div id="reasoningLabels" class="reasoning-labels"></div>
+        <div id="reasoningEmpty" class="reasoning-empty hidden">This model has no reasoning levels.</div>
+      </div>
+
+      <div id="dictationBar" class="dictation-bar hidden" role="status" aria-live="polite">
+        <canvas id="dictationWave" class="dictation-wave"></canvas>
+        <div class="dictation-row">
+          <span class="dictation-spin" aria-hidden="true"></span>
+          <span id="dictationState" class="dictation-state">Listening…</span>
+        </div>
+        <div id="dictationGhost" class="dictation-ghost hidden"></div>
+      </div>
+
       <!-- Rounded-3xl Box Container with BorderBeam -->
       <div class="border-beam-container" id="promptBeamContainer">
         <div class="prompt-input-box" id="promptBox">
@@ -356,14 +381,26 @@
                 </svg>
               </button>
 
-              <!-- Search Toggle Pill (TinyFish Web Search) -->
-              <button id="toggleSearchBtn" class="action-pill" type="button" title="Smart web search with TinyFish AI">
-                <svg class="pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="2" y1="12" x2="22" y2="12"></line>
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              <!-- Dictation: speak and it is typed into the box -->
+              <button id="micBtn" class="tool-circle-btn" type="button" title="Dictate (click to start, click again to stop)" aria-pressed="false">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 10v3"></path>
+                  <path d="M6 6v11"></path>
+                  <path d="M10 3v18"></path>
+                  <path d="M14 8v7"></path>
+                  <path d="M18 5v13"></path>
+                  <path d="M22 10v3"></path>
                 </svg>
-                <span>Search</span>
+              </button>
+
+              <!-- Reasoning level slider -->
+              <button id="reasoningBtn" class="action-pill" type="button" title="Reasoning level" aria-haspopup="true">
+                <svg class="pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                  <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                  <path d="M12 3v18"/>
+                </svg>
+                <span id="reasoningBtnLabel">Reasoning</span>
               </button>
 
               <span class="tool-divider"></span>
@@ -403,14 +440,21 @@
                     <span id="meterPercentBadge" class="context-percent-badge">0.2%</span>
                   </div>
                   <ul class="context-breakdown-list">
-                    <li><span class="breakdown-label">System prompt</span><span id="meterSysTokens" class="breakdown-val">1.8k</span></li>
-                    <li><span class="breakdown-label">Page context</span><span id="meterPageTokens" class="breakdown-val">0</span></li>
-                    <li><span class="breakdown-label">Attached files</span><span id="meterFileTokens" class="breakdown-val">0</span></li>
-                    <li><span class="breakdown-label">Conversation</span><span id="meterConvTokens" class="breakdown-val">0</span></li>
+                    <li><span class="breakdown-label">System prompt</span><span class="breakdown-val"><b id="meterSysTokens">1.8k</b><em id="meterSysCost" class="breakdown-cost"></em></span></li>
+                    <li><span class="breakdown-label">Page context</span><span class="breakdown-val"><b id="meterPageTokens">0</b><em id="meterPageCost" class="breakdown-cost"></em></span></li>
+                    <li><span class="breakdown-label">Attached files</span><span class="breakdown-val"><b id="meterFileTokens">0</b><em id="meterFileCost" class="breakdown-cost"></em></span></li>
+                    <li><span class="breakdown-label">Conversation</span><span class="breakdown-val"><b id="meterConvTokens">0</b><em id="meterConvCost" class="breakdown-cost"></em></span></li>
                   </ul>
                   <div class="context-popover-footer">
                     <span>Total used:</span>
                     <strong id="meterTotalUsed">1.8k / 1.0M</strong>
+                  </div>
+                  <div class="context-cost-block">
+                    <div class="context-cost-title">ESTIMATED COST · NOT A REAL BILL</div>
+                    <div class="context-cost-row"><span id="meterModelName">Model</span><span id="meterPriceLabel" class="context-cost-muted"></span></div>
+                    <div class="context-cost-row"><span>Next message (input)</span><strong id="meterNextCost">$0</strong></div>
+                    <div class="context-cost-row"><span>Spent in this chat</span><strong id="meterSessionCost">$0</strong></div>
+                    <div id="meterCostNote" class="context-cost-note"></div>
                   </div>
                 </div>
               </div>
@@ -432,9 +476,6 @@
         </div>
       </div>
 
-      <div class="input-disclaimer">
-        Antigravity can make mistakes. Verify important information.
-      </div>
     </footer>
 
     <!-- History Drawer -->
@@ -492,7 +533,7 @@
           <button type="button" class="settings-tab-trigger active" data-tab="settings">⚙️ Settings</button>
           <button type="button" class="settings-tab-trigger" data-tab="appearance">🎨 Appearance</button>
           <button type="button" class="settings-tab-trigger" data-tab="additional">🧩 Tools & MCP</button>
-          <button type="button" class="settings-tab-trigger" data-tab="user">👤 User & Skills</button>
+          <button type="button" class="settings-tab-trigger" data-tab="user">👤 User Settings</button>
         </div>
 
         <div class="modal-body settings-modal-body">
@@ -536,7 +577,7 @@
                 </div>
 
                 <div class="setting-field">
-                  <label for="settingAgentLanguage">Response Language</label>
+                  <label for="settingAgentLanguage">Answers language</label>
                   <select id="settingAgentLanguage">
                     <option value="en">🇺🇸 English</option>
                     <option value="es" selected>🇪🇸 Español</option>
@@ -577,14 +618,12 @@
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingAntigravityMode">Execution Engine</label>
-                  <select id="settingAntigravityMode">
+                  <label>Engine</label>
+                  <div class="engine-choice-group" data-prov="antigravity"></div>
+                  <select id="settingAntigravityMode" class="hidden">
                     <option value="api" selected>Gemini API (Direct Google Gemini Key - Sin Local Bridge)</option>
                     <option value="desktop">Local Terminal (Local Bridge / CLI)</option>
                   </select>
-                  <div class="field-hint">
-                    Select Gemini API for direct cloud requests without Local Bridge, or Local Terminal for bridge execution.
-                  </div>
                 </div>
 
                 <div class="setting-field" id="geminiKeyContainer">
@@ -611,14 +650,12 @@
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingClaudeMode">Execution Engine</label>
-                  <select id="settingClaudeMode">
+                  <label>Engine</label>
+                  <div class="engine-choice-group" data-prov="claude"></div>
+                  <select id="settingClaudeMode" class="hidden">
                     <option value="api" selected>Claude API (Direct Anthropic Key - Sin Local Bridge)</option>
                     <option value="desktop">Local Terminal (Local CLI / Terminal)</option>
                   </select>
-                  <div class="field-hint" id="claudeModeHint">
-                    Invoke official Anthropic API directly without Local Bridge, or run locally via CLI.
-                  </div>
                 </div>
 
                 <div class="setting-field" id="anthropicKeyContainer">
@@ -647,14 +684,12 @@
               </div>
               <div class="card-content">
                 <div class="setting-field">
-                  <label for="settingOpenaiMode">Execution Engine</label>
-                  <select id="settingOpenaiMode">
+                  <label>Engine</label>
+                  <div class="engine-choice-group" data-prov="openai"></div>
+                  <select id="settingOpenaiMode" class="hidden">
                     <option value="api" selected>ChatGPT API (Direct OpenAI Key - Sin Local Bridge)</option>
                     <option value="desktop">Local Terminal (Local CLI)</option>
                   </select>
-                  <div class="field-hint">
-                    Run OpenAI models through Local Terminal or connect directly using an OpenAI API Key.
-                  </div>
                 </div>
 
                 <div class="setting-field" id="openaiKeyContainer">
@@ -995,6 +1030,206 @@
               </div>
             </div>
 
+            <!-- Sub-Card: Estimated prices -->
+            <div class="settings-card" id="pricingSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Model prices (estimates)</h4>
+                  <p class="card-desc">US dollars per 1M tokens, input and output</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <p class="price-disclaimer">The costs Autono shows are <strong>estimates</strong>, not your real bill. They use the list prices below, checked on <span id="pricingCheckedOn"></span>, and ignore caching, discounts and tokenizer differences. Prices change: please review them against the provider pages and correct anything that is out of date.</p>
+                <div class="price-links">
+                  <a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noopener noreferrer">Anthropic</a>
+                  <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer">Google</a>
+                  <a href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noopener noreferrer">OpenAI</a>
+                </div>
+                <div class="price-head"><span>Model</span><span>Input</span><span>Output</span></div>
+                <div id="pricingTable" class="price-table"></div>
+                <button type="button" id="resetPricesBtn" class="drawer-action-btn" style="margin-top:8px;">Reset to list prices</button>
+              </div>
+            </div>
+
+            <!-- Sub-Card: Dictation (local Whisper) -->
+            <div class="settings-card" id="whisperSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Dictation (microphone)</h4>
+                  <p class="card-desc">Speak and your words are typed into the box. English and Spanish for now; more languages are coming soon.</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <div class="setting-field">
+                  <label for="whisperEngineSelect">Engine</label>
+                  <select id="whisperEngineSelect">
+                    <option value="parakeet">Parakeet (recommended): fast and accurate, English and Spanish, runs on your computer</option>
+                    <option value="whisper">Whisper Tiny: built in, works offline, less accurate</option>
+                    <option value="browser">Browser: sends the audio to Google</option>
+                  </select>
+                </div>
+                <div class="setting-field">
+                  <label for="dictationLangSelect">Voice and dictation language</label>
+                  <select id="dictationLangSelect">
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                    <option value="auto">Auto-detect</option>
+                    <option value="soon" disabled>More languages: coming soon</option>
+                  </select>
+                </div>
+                <div id="parakeetPanel" class="hidden">
+                  <div id="parakeetStatus" class="piper-status">Checking the Bridge…</div>
+                  <div id="parakeetProgress" class="piper-progress hidden"><div id="parakeetProgressBar"></div></div>
+                  <div class="piper-actions">
+                    <button type="button" id="parakeetInstallBtn" class="drawer-action-btn hidden">Install the speech engine (about 150 MB)</button>
+                    <button type="button" id="parakeetDownloadBtn" class="drawer-action-btn hidden">Download the model (about 650 MB)</button>
+                    <button type="button" id="parakeetTestBtn" class="drawer-action-btn hidden">Test dictation</button>
+                    <button type="button" id="parakeetDeleteBtn" class="drawer-action-btn hidden">Delete the model</button>
+                  </div>
+                  <div class="field-hint">NVIDIA Parakeet TDT 0.6B v3 (open source, CC-BY-4.0). It runs in your Bridge, never online. It hears English and Spanish by itself, so the language above only matters for the voice.</div>
+                </div>
+                <div id="whisperLocal">
+                  <div class="piper-actions">
+                    <button type="button" id="whisperTestBtn" class="drawer-action-btn">Test dictation</button>
+                  </div>
+                  <div id="whisperStatus" class="piper-status"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-Card: Updates and Bridge -->
+            <div class="settings-card" id="updatesSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Updates and Bridge</h4>
+                  <p class="card-desc">Autono looks for a newer version on GitHub every time you open it. Updating keeps your chats and settings.</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <div id="updateStatusLines" class="piper-status">Checking…</div>
+                <div class="piper-progress hidden" id="updateProgress"><div id="updateProgressBar"></div></div>
+                <div class="piper-actions">
+                  <button type="button" id="updateCheckBtn" class="drawer-action-btn">Check now</button>
+                  <button type="button" id="updateApplyBtn" class="drawer-action-btn hidden">Update</button>
+                  <button type="button" id="bridgeRestartBtn" class="drawer-action-btn">Restart the Bridge (hard reset)</button>
+                </div>
+                <div class="field-hint">The hard reset closes the Bridge completely, frees its port and opens it again. Use it when the Bridge does not come back after being closed.</div>
+                <div class="setting-field">
+                  <label for="updatePathInput">Autono folder (only if the update cannot find it)</label>
+                  <input type="text" id="updatePathInput" placeholder="C:\path\to\Autono" spellcheck="false">
+                  <div class="field-hint">The folder you chose in chrome://extensions → Load unpacked. Usually found on its own.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-Card: Voice (Piper text-to-speech) -->
+            <div class="settings-card" id="piperSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Voice (read answers aloud)</h4>
+                  <p class="card-desc">Local text-to-speech with Piper, run by your Bridge. Nothing leaves your computer.</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <div id="piperStatus" class="piper-status">Checking the Bridge…</div>
+                <button type="button" id="piperRefreshBtn" class="drawer-action-btn">Refresh voices</button>
+                <button type="button" id="piperInstallBtn" class="drawer-action-btn hidden">Install the voice engine (about 300 MB)</button>
+                <div id="piperControls" class="hidden">
+                  <div class="setting-field hidden" id="piperVoiceLangField">
+                    <label for="piperVoiceLangSelect">Choose the voice for</label>
+                    <select id="piperVoiceLangSelect"><option value="en">English</option><option value="es" selected>Español</option></select>
+                    <div class="field-hint">With auto-detect, each answer is read with the voice of its language.</div>
+                  </div>
+                  <div class="setting-field">
+                    <label for="piperVoiceSelect">Voice for <span id="piperLangName">your language</span></label>
+                    <select id="piperVoiceSelect"></select>
+                    <div class="field-hint">The list follows the voice language chosen in Dictation. Higher quality means a bigger download.</div>
+                  </div>
+                  <div class="piper-actions">
+                    <button type="button" id="piperDownloadBtn" class="drawer-action-btn">Download</button>
+                    <button type="button" id="piperTestBtn" class="drawer-action-btn">Test</button>
+                    <button type="button" id="piperDeleteBtn" class="drawer-action-btn">Delete</button>
+                  </div>
+                  <div id="piperProgress" class="piper-progress hidden"><div id="piperProgressBar"></div></div>
+                  <div class="setting-field">
+                    <label for="piperSpeed">Speed</label>
+                    <select id="piperSpeed">
+                      <option value="0.85">Slower</option>
+                      <option value="1" selected>Normal</option>
+                      <option value="1.2">Faster</option>
+                      <option value="1.5">Much faster</option>
+                    </select>
+                  </div>
+                  <div class="setting-field-toggle">
+                    <div class="toggle-text">
+                      <span class="toggle-title">Read every answer aloud</span>
+                      <span class="toggle-desc">Otherwise use the speaker button under an answer. Code blocks are skipped.</span>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="piperAutoRead">
+                      <span class="slider-toggle"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-Card: Mascot -->
+            <div class="settings-card" id="mascotSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Mascot</h4>
+                  <p class="card-desc">Optional: a little critter that follows your task on whatever tab you are on</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Show the mascot</span>
+                    <span class="toggle-desc">It walks onto the page you are on when a task starts, when it needs your OK and when it finishes, so you do not have to keep checking. It works with every model, API or local terminal. Press Alt+Shift+1 to call it any time and ask a quick /btw question without touching the task.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingMascot" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+                <button type="button" id="mascotTestBtn" class="drawer-action-btn">Preview on this tab</button>
+              </div>
+            </div>
+
+            <!-- Sub-Card: Multi-agent -->
+            <div class="settings-card" id="multiAgentSettingsCard">
+              <div class="card-header">
+                <div>
+                  <h4 class="card-title">Multi-agent</h4>
+                  <p class="card-desc">Let the assistant split big requests into parallel sub-agents</p>
+                </div>
+              </div>
+              <div class="card-content">
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Allow sub-agents in chat</span>
+                    <span class="toggle-desc">In Chat, each sub-agent runs in its own terminal on the Bridge (or as a separate API call). In Cowork, each agent opens its own browser tab and works on a task in parallel. Up to 50 agents per run. Works with Antigravity, Claude and OpenAI. You can also start one request with /teamwork.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingMultiAgent">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Ask before creating agents</span>
+                    <span class="toggle-desc">You approve every batch of new agents. If you turn this off, agents are created without asking and <strong>can spend a lot of tokens</strong> quickly.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingAgentConfirm" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <!-- Sub-Card 3: Shadow Mode & Power Management -->
             <div class="settings-card shadow-card" id="shadowSettingsCard">
               <div class="card-header shadow-card-header">
@@ -1079,6 +1314,72 @@
 
           <!-- Tab 4: User & Skills (Profile & Reusable Skills) -->
           <div class="settings-tab-content hidden" id="tabContent-user">
+            <!-- Preferences: everything chosen in the welcome setup (and more), in one place -->
+            <div class="settings-card" id="userPrefsCard">
+              <div class="card-header">
+                <h4 class="card-title">Preferences</h4>
+                <p class="card-desc">What you picked when you set Autono up, plus the main options. Changes apply when you press Save.</p>
+              </div>
+              <div class="card-content">
+                <div class="setting-field">
+                  <label for="um_settingAgentLanguage">Answers language</label>
+                  <select id="um_settingAgentLanguage" data-mirror="settingAgentLanguage"></select>
+                  <div class="field-hint">The language Autono writes its answers in. Any language from the list.</div>
+                </div>
+                <div class="setting-field">
+                  <label for="um_dictationLangSelect">Voice and dictation language</label>
+                  <select id="um_dictationLangSelect" data-mirror="dictationLangSelect"></select>
+                  <div class="field-hint">What you speak and the voice that reads answers: English, Spanish or auto-detect. More languages are coming soon.</div>
+                </div>
+                <div class="setting-field">
+                  <label for="um_settingDefaultModel">Default model</label>
+                  <select id="um_settingDefaultModel" data-mirror="settingDefaultModel"></select>
+                </div>
+                <div class="setting-field">
+                  <label for="um_settingDefaultThinking">Reasoning level</label>
+                  <select id="um_settingDefaultThinking" data-mirror="settingDefaultThinking"></select>
+                </div>
+                <div class="setting-field">
+                  <label for="um_settingBridgeUrl">Local Bridge URL</label>
+                  <input type="text" id="um_settingBridgeUrl" data-mirror="settingBridgeUrl" placeholder="http://127.0.0.1:8765" spellcheck="false">
+                </div>
+                <div class="setting-field">
+                  <label for="um_settingTinyFishKey">TinyFish web search key (optional)</label>
+                  <input type="password" id="um_settingTinyFishKey" data-mirror="settingTinyFishKey" placeholder="tf_..." autocomplete="off">
+                </div>
+                <div class="setting-field">
+                  <label for="um_whisperEngineSelect">Dictation</label>
+                  <select id="um_whisperEngineSelect" data-mirror="whisperEngineSelect"></select>
+                </div>
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Read every answer aloud</span>
+                    <span class="toggle-desc">Needs a voice downloaded in Settings → Voice.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="um_piperAutoRead" data-mirror="piperAutoRead">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Mascot</span>
+                    <span class="toggle-desc">The little helper that walks onto your tab.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="um_settingMascot" data-mirror="settingMascot">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+                <div class="piper-actions">
+                  <button type="button" id="userRerunSetupBtn" class="drawer-action-btn">Run the welcome setup again</button>
+                </div>
+              </div>
+              <div class="card-footer">
+                <button type="button" class="save-settings-btn tab-save-btn">Save Preferences</button>
+              </div>
+            </div>
+
             <!-- Profile Card -->
             <div class="settings-card">
               <div class="card-header">

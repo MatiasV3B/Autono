@@ -190,9 +190,21 @@ El **Model Bridge** es un programa pequeño que corre en tu PC y permite que Aut
 ### Elige un modelo y cuánto piensa
 Pulsa el botón del modelo en la parte de arriba:
 - **Pestañas:** `Antigravity` · `Claude` · `OpenAI`.
-- **Nivel de razonamiento:** Low / Medium / High (Claude y OpenAI también tienen X-High y Max; Claude Haiku ofrece Fast o Thinking).
-- **Motor:** en el panel de vista previa, cambia entre **Local Terminal** y **API**.
+- **Vista previa:** el selector solo describe el modelo (precio y benchmarks).
+- **Razonamiento:** el botón **Reasoning** del cuadro de texto abre un slider encima; arrástralo al nivel que quieras (Low / Medium / High, y X-High y Max en Claude y OpenAI).
+- **Motor:** el botón **Engine** de la barra superior cambia entre **Local Terminal** y la **API** del proveedor.
 - **🔄 Recargar modelos:** trae la lista actual desde tu Bridge y/o tus API keys y deja solo el modelo más nuevo de cada familia, para que la lista sea corta y clara.
+
+### Multi-agente 🧩
+Activa **Ajustes → Multi-agent** (o empieza una petición con `/teamwork`) y el asistente podrá dividir una petición grande en **sub-agentes** que trabajan en paralelo. Cada sub-agente recibe su propio prompt de asistente y se ejecuta en su propia terminal del Bridge (o como una llamada aparte a la API en modo API); al terminar, su resultado vuelve al asistente principal, que redacta la respuesta final. Una tarjeta en el chat muestra el progreso de cada agente. Funciona con Antigravity, Claude y OpenAI, en modo Terminal local o API.
+
+**En Cowork** el mismo interruptor deja que el agente abra hasta 50 agentes, cada uno en su propia pestaña del navegador y trabajando en paralelo. Autono te pregunta antes de crear agentes (puedes desactivar la pregunta en Ajustes, pero advierte que los agentes pueden gastar muchos tokens).
+
+### Mascota 🦀
+Un extra opcional (Ajustes → Mascot): una criaturita pixelada que llega caminando a la pestaña donde estés cuando empieza una tarea, cuando necesita tu OK y cuando termina, para que no tengas que revisar cada rato. Cambia de animación según lo que haga la tarea (leyendo la página, pensando, programando, depurando, buscando, agentes, terminó). Al terminar, el modelo escribe un mensajito de una línea que aparece en su globo de diálogo, así ves qué hizo sin volver a la pestaña. Funciona con cualquier modelo, por API o terminal local. Pulsa <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> para llamarla cuando quieras y haz clic para una pregunta **/btw** mientras corre una tarea; responde sin tocarla. Cuando la tarea ya terminó, un clic abre una caja de mensaje normal que continúa el mismo chat, y con doble clic se va. Puedes cambiar el atajo en `chrome://extensions/shortcuts`.
+
+### Rueda de contexto y costo estimado
+Pasa el cursor por el anillo junto al botón de enviar para ver cómo se usa el contexto (prompt del sistema, página, archivos adjuntos, conversación) con un precio estimado de cada parte, el precio del próximo mensaje y lo que lleva gastado el chat. Los precios son **estimaciones con precios de lista** (revisados el 2026-10-07 en las páginas de precios de Anthropic, Google y OpenAI), nunca tu factura real. Puedes revisar y editar cada precio en **Ajustes → Model prices**. La Terminal local usa tu propia suscripción, así que no se cobra por token y las cifras son el equivalente en API.
 
 ### Modo Chat 💬
 Pregunta lo que quieras sobre la página. Autono lee su contenido automáticamente (sin modificarla). Puedes adjuntar archivos, otras pestañas o un elemento concreto de la página para dar más contexto.
@@ -212,6 +224,9 @@ Mientras trabaja, una capa azul brillante indica que la página está bajo el co
 
 ### Más funciones
 - **Comandos con barra:** escribe `/` en el cuadro de texto para verlos (`/goal`, `/schedule`, `/grill-me`, `/teamwork`, `/learn`, …).
+- **Dictado:** pulsa el botón de la onda de sonido del cuadro de texto, habla, y tus palabras se escriben en el cuadro en el idioma de respuesta que elegiste. Por defecto usa el reconocimiento de voz del navegador (el audio va a Google). El mejor motor es **NVIDIA Parakeet** (código abierto, inglés y español, detecta el idioma solo): corre en tu Bridge, es rápido y preciso, y se instala desde **Ajustes → Dictation** (motor de unos 150 MB, modelo de unos 650 MB, una sola vez). Si no lo tienes, Autono usa un modelo pequeño **Whisper Tiny** incluido (31 MB, sin conexión, menos preciso; inglés y español). Con ninguno de los dos sale algo de tu computador. Mientras hablas se ven las ondas de sonido, las palabras entendidas aparecen en cursiva clara y, al parar, gira una rueda hasta que el texto queda escrito en el cuadro. **Test dictation** comprueba que funciona. La primera vez, Chrome pide el micrófono en una pestaña. La búsqueda web con TinyFish está siempre activa para preguntas más largas.
+- **Actualizaciones:** cada vez que abres Autono revisa GitHub en segundo plano. Si hay algo nuevo, un aviso dice *New update available* con un botón **Update**: actualiza el Bridge y los archivos de la extensión, reinicia el Bridge, recarga Autono y conserva tus chats y ajustes. En **Ajustes → Updates and Bridge** también están *Check now* y un botón de **reinicio completo** que cierra el Bridge del todo, libera su puerto y lo abre de nuevo.
+- **Leer en voz alta:** el botón del parlante bajo cada respuesta la lee con **Piper**, un motor de texto a voz local que ejecuta tu Bridge. En **Ajustes → Voice** eliges una voz para tu idioma y la descargas (unos 20 a 115 MB, una sola vez); el motor se instala con un clic. También puedes hacer que lea cada respuesta automáticamente. Piper solo habla; no transcribe.
 - **Historial de chats** con carpetas, búsqueda y renombrado. Los títulos los genera el modelo automáticamente.
 - **Skills personalizadas**, **servidores MCP** y hasta **5 proveedores extra compatibles con OpenAI** (por ejemplo OpenRouter o Groq).
 - Opciones de **temas, idioma, tipografía y audio**, y una clave opcional de **búsqueda web** (TinyFish).

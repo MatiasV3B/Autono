@@ -6,6 +6,7 @@
 import { searchWithTinyFish, formatTinyFishForPrompt } from '../lib/tinyfish.js';
 import katex from './vendor/katex.mjs';
 import { marked } from './vendor/marked.esm.js';
+import { SpeechSegmenter, cleanTranscript, SAMPLE_RATE } from './dictation-vad.js';
 
 marked.setOptions({
   gfm: true,
@@ -53,7 +54,7 @@ marked.setOptions({
   const confirmAttachTabsBtn = document.getElementById('confirmAttachTabsBtn');
   const tabsListContainer = document.getElementById('tabsListContainer');
 
-  const toggleSearchBtn = document.getElementById('toggleSearchBtn');
+  const micBtn = document.getElementById('micBtn');
   const toggleCoworkBtn = document.getElementById('toggleCoworkBtn');
 
   const sendBtn = document.getElementById('sendBtn');
@@ -110,7 +111,7 @@ marked.setOptions({
   let currentSessionId = generateId();
   let currentTaskId = null;
   let isGenerating = false;
-  let isSearchActive = false;
+  const isSearchActive = true; // web search (TinyFish) is always on; there is no switch any more
   let isCoworkActive = false;
   let attachedImageDataUrl = null;
   let currentStreamingBubble = null;
@@ -266,7 +267,7 @@ marked.setOptions({
           name: 'Claude Opus 5.5',
           desc: 'Frontier supreme intelligence for ultra-complex multi-turn reasoning, safety and deep architecture.',
           contextWindow: '1.0M tokens',
-          metrics: { intelligence: 9, speed: 3, context: 10, efficiency: 8 },
+          metrics: { intelligence: 9, speed: 6, context: 10, efficiency: 8 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'medium', 'high', 'x-high', 'max'],
           defaultThinking: 'high',
@@ -277,7 +278,7 @@ marked.setOptions({
           name: 'Claude Fable 5.1',
           desc: 'Specialized for agentic storytelling, sequence-of-thought workflows and dynamic web tasks.',
           contextWindow: '500K tokens',
-          metrics: { intelligence: 7, speed: 7, context: 8, efficiency: 6 },
+          metrics: { intelligence: 7, speed: 2, context: 8, efficiency: 6 },
           caps: ['reasoning', 'image'],
           thinking: ['low', 'medium', 'high', 'x-high', 'max'],
           defaultThinking: 'high',
@@ -337,6 +338,17 @@ marked.setOptions({
           usageGroup: 'claude_gpt',
         },
         {
+          id: 'gpt-6-terra',
+          name: 'GPT-6 Terra',
+          desc: 'Grounded web navigation, tool orchestration and robust real-world automation.',
+          contextWindow: '1.0M tokens',
+          metrics: { intelligence: 8, speed: 7, context: 10, efficiency: 6 },
+          caps: ['reasoning', 'image'],
+          thinking: ['low', 'medium', 'high', 'x-high', 'max'],
+          defaultThinking: 'medium',
+          usageGroup: 'claude_gpt',
+        },
+        {
           id: 'gpt-5-6-terra',
           name: 'GPT-5.6 Terra',
           desc: 'Grounded web navigation, tool orchestration and robust real-world automation.',
@@ -369,20 +381,20 @@ marked.setOptions({
           defaultThinking: 'high',
           usageGroup: 'claude_gpt',
         },
-        {
-          id: 'gpt-oss-120b-medium',
-          name: 'GPT-OSS 120B',
-          desc: 'Open source inference (MoE), unrestricted throughput, local edge deployment and total privacy.',
-          contextWindow: '128K tokens',
-          metrics: { intelligence: 6, speed: 2, context: 5, efficiency: 6 },
-          caps: ['reasoning', 'image'],
-          thinking: ['low', 'medium', 'high'],
-          defaultThinking: 'medium',
-          usageGroup: 'claude_gpt',
-        },
       ],
     },
   };
+
+  // OpenAI tab rule: only <number>-<Astra|Sol|Luna|Terra> models from 5.6 on, and GPT-6 always has all four
+  const GPT6_REQUIRED = PROVIDER_DATA.chatgpt.models.filter((m) => /^gpt-6-/.test(m.id)).map((m) => ({ ...m }));
+  function openAiModelInfo(id) {
+    const m = /^gpt-(\d+)(?:-(\d+))?-(astra|sol|luna|terra)/.exec(String(id || '').toLowerCase().replace(/\./g, '-'));
+    return m ? { major: parseInt(m[1], 10), minor: m[2] ? parseInt(m[2], 10) : 0, tier: m[3] } : null;
+  }
+  function isAllowedOpenAiModel(id) {
+    const info = openAiModelInfo(id);
+    return !!info && (info.major > 5 || (info.major === 5 && info.minor >= 6));
+  }
 
   let activeProvider = 'gemini';
   let activeModelTab = 'antigravity'; // 'antigravity', 'claude', or 'openai'
@@ -625,8 +637,8 @@ marked.setOptions({
       return;
     }
 
-    // Cap at a maximum of 5 suggestions as requested
-    const finalSuggestions = cleanedSuggestions.slice(0, 5);
+    // Keep the row short: three suggestions at most
+    const finalSuggestions = cleanedSuggestions.slice(0, 3);
 
     row.innerHTML = '';
     finalSuggestions.forEach((cleanText) => {
@@ -931,9 +943,23 @@ marked.setOptions({
 
       case 'bridge_status':
         updateBridgeStatus(msg.online);
+        if (msg.online && msg.outdated && !window.__bridgeOutdatedWarned) {
+          window.__bridgeOutdatedWarned = true;
+          showToast('Your Bridge is running old code. Close it and open it again (or run Actualizar-AntigravityBridge).');
+        }
         break;
 
       case 'quota_update':
+        break;
+
+      case 'external_user_message':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
+        createMessageRow('user', msg.text || '');
+        break;
+
+      case 'agent_permission_request':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
+        showAgentPermissionCard(msg);
         break;
 
       case 'task_start':
@@ -1079,6 +1105,9 @@ marked.setOptions({
           }
         }
         renderAiPromptSuggestions(msg.fullAnswer || msg.summary || lastUserPrompt);
+        if (localStorage.getItem(PIPER_AUTO_KEY) === '1' && (msg.mode === 'chat' || msg.mode === 'cowork')) {
+          speakText(msg.fullAnswer || msg.summary || '');
+        }
         scrollToBottom();
         handleAutoNamingAfterTask(msg.fullAnswer || msg.summary || '');
         break;
@@ -1484,7 +1513,7 @@ marked.setOptions({
         const effortTitle = effort === 'fast'
           ? 'Fast'
           : (effort === 'x-high'
-            ? 'X-High'
+            ? 'Extra'
             : (effort === 'thinking' ? 'Thinking' : (effort === 'max' ? 'Max' : effort.charAt(0).toUpperCase() + effort.slice(1))));
         selectedModelLabel.textContent = `${currentModelObj.name} (${effortTitle})`;
       }
@@ -1495,6 +1524,7 @@ marked.setOptions({
       antigravity_thinking_effort: currentThinkingEffort,
       antigravity_default_model: currentModel,
     });
+    renderReasoningSlider();
   }
 
   // ─── Simple & Robust Model Recognition Engine ──────────────────────────────
@@ -1696,6 +1726,7 @@ marked.setOptions({
 
     const { model, provider, effort } = match;
     if (model.dynamicSource === 'gemini') setAntigravityModeQuiet('api');
+    if (!preserveEffort && currentBaseModelId !== model.id) setReasoningChosen(false);
     currentBaseModelId = model.id;
     activeProvider = provider.id;
 
@@ -1758,7 +1789,7 @@ marked.setOptions({
         const effortTitle = currentThinkingEffort === 'fast'
           ? 'Fast'
           : (currentThinkingEffort === 'x-high'
-            ? 'X-High'
+            ? 'Extra'
             : (currentThinkingEffort === 'thinking' ? 'Thinking' : (currentThinkingEffort === 'max' ? 'Max' : currentThinkingEffort.charAt(0).toUpperCase() + currentThinkingEffort.slice(1))));
         selectedModelLabel.textContent = `${model.name} (${effortTitle})`;
       }
@@ -1772,6 +1803,8 @@ marked.setOptions({
 
     // Render preview panel for the selected model
     renderModelPreviewPanel(model, currentThinkingEffort);
+    renderReasoningSlider();
+    updateProviderButton();
 
     // Persist
     chrome.storage.local.set({
@@ -1882,7 +1915,6 @@ marked.setOptions({
 
     const delta = REASONING_INTELLIGENCE_DELTA[activeEffort] || 0;
     const baseIntel = model.metrics?.intelligence || 7;
-    // Grounded & balanced ratings: scalable up to 10
     const adjustedIntel = Math.min(10, Math.max(1, Math.round(baseIntel + delta)));
     const speed = Math.min(10, Math.max(1, Math.round(model.metrics?.speed || 6)));
     const context = model.metrics?.context || 6;
@@ -1892,122 +1924,13 @@ marked.setOptions({
     const isOpenAIFamily = !isClaudeFamily && (model.id === 'gpt-oss-120b-medium' ? (model.usageGroup !== 'gemini' && activeModelTab !== 'antigravity') : isOpenAIModel(model.id));
     const providerName = isClaudeFamily ? 'Anthropic' : (isOpenAIFamily ? 'OpenAI' : 'Antigravity');
 
-    const formatEffortLabel = (lvl) => {
-      if (lvl === 'fast') return 'Fast';
-      if (lvl === 'x-high') return 'X-High';
-      if (lvl === 'thinking') return 'Thinking';
-      if (lvl === 'max') return 'Max';
-      return lvl.charAt(0).toUpperCase() + lvl.slice(1);
-    };
-
-    const radioButtonsHtml = thinkingList.map((lvl) => `
-      <button type="button" class="seg-radio-btn ${lvl === activeEffort ? 'active' : ''}" data-effort="${lvl}">
-        ${formatEffortLabel(lvl)}
-      </button>
-    `).join('');
-
-    const isGptOss = model.id === 'gpt-oss-120b-medium';
-    const forcedLocal = activeModelTab === 'antigravity' && (isClaudeFamily || isOpenAIFamily || isGptOss);
     const apiOnly = model.dynamicSource === 'gemini';
-    let engineModeHtml = '';
-    if (apiOnly) {
-      engineModeHtml = currentGeminiApiKey ? '' : `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div style="font-size:9.5px;color:#a1a1aa;line-height:1.35;">⚠️ Configure your Gemini API Key in Settings.</div>
-        </div>
-      `;
-    } else if (forcedLocal) {
-      engineModeHtml = `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div class="preview-config-label">EXECUTION ENGINE</div>
-          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;">
-            🟢 Antigravity Local Terminal (runs locally via the Bridge). To use the official API, pick this model from the ${isClaudeFamily ? 'Claude' : 'OpenAI'} tab.
-          </div>
-        </div>
-      `;
-    } else if (isGptOss) {
-      const gptOssMode = currentOpenaiMode === 'api' ? 'api' : 'desktop';
-      engineModeHtml = `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div class="preview-config-label">EXECUTION ENGINE</div>
-          <div class="preview-config-sub">Execution Mode (via OpenAI in API mode)</div>
-          <div class="segmented-radio-group" id="previewGptOssModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${gptOssMode !== 'api' ? 'active' : ''}" data-provider="openai" data-mode="desktop" title="Use local terminal execution (no API key required)">
-              💻 Local Terminal
-            </button>
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${gptOssMode === 'api' ? 'active' : ''}" data-provider="openai" data-mode="api" title="Use OpenAI API directly with your OpenAI API Key (not available via Gemini API)">
-              ⚡ OpenAI API
-            </button>
-          </div>
-          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="gptOssModePreviewNote">
-            ${gptOssMode === 'api'
-              ? (currentOpenaiApiKey ? '🟢 OpenAI API mode active (OpenAI Key configured).' : '⚠️ OpenAI API selected without OpenAI API Key. Configure in Settings.')
-              : '🟢 Local Terminal mode active (runs locally via CLI/terminal).'}
-          </div>
-        </div>
-      `;
-    } else if (isClaudeFamily) {
-      engineModeHtml = `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div class="preview-config-label">EXECUTION ENGINE</div>
-          <div class="preview-config-sub">Claude Mode</div>
-          <div class="segmented-radio-group" id="previewClaudeModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentClaudeMode !== 'api' ? 'active' : ''}" data-provider="claude" data-mode="desktop" title="Use local terminal with Claude Terminal (no API key required)">
-              💻 Local Terminal
-            </button>
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentClaudeMode === 'api' ? 'active' : ''}" data-provider="claude" data-mode="api" title="Use official Anthropic API directly with your Anthropic API Key">
-              ⚡ Claude API
-            </button>
-          </div>
-          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="claudeModePreviewNote">
-            ${currentClaudeMode === 'api'
-              ? (currentAnthropicApiKey ? '🟢 Claude API mode active (Anthropic Key configured).' : '⚠️ Claude API selected without Anthropic API Key. Configure in Settings.')
-              : '🟢 Local Terminal mode active (runs locally via CLI/terminal).'}
-          </div>
-        </div>
-      `;
-    } else if (isOpenAIFamily) {
-      engineModeHtml = `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div class="preview-config-label">EXECUTION ENGINE</div>
-          <div class="preview-config-sub">OpenAI Mode</div>
-          <div class="segmented-radio-group" id="previewOpenaiModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentOpenaiMode !== 'api' ? 'active' : ''}" data-provider="openai" data-mode="desktop" title="Use local terminal execution">
-              💻 Local Terminal
-            </button>
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentOpenaiMode === 'api' ? 'active' : ''}" data-provider="openai" data-mode="api" title="Use official OpenAI API directly with your OpenAI API Key">
-              ⚡ ChatGPT API
-            </button>
-          </div>
-          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="openaiModePreviewNote">
-            ${currentOpenaiMode === 'api'
-              ? (currentOpenaiApiKey ? '🟢 ChatGPT API mode active (OpenAI Key configured).' : '⚠️ ChatGPT API selected without OpenAI API Key. Configure in Settings.')
-              : '🟢 Local Terminal mode active (runs locally via Codex CLI).'}
-          </div>
-        </div>
-      `;
-    } else {
-      engineModeHtml = `
-        <div class="preview-config-section" style="margin-top:8px;">
-          <div class="preview-config-label">EXECUTION ENGINE</div>
-          <div class="preview-config-sub">Antigravity Mode</div>
-          <div class="segmented-radio-group" id="previewAntigravityModeGroup" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentAntigravityMode !== 'api' ? 'active' : ''}" data-provider="antigravity" data-mode="desktop" title="Use local terminal via local bridge">
-              💻 Local Terminal
-            </button>
-            <button type="button" class="seg-radio-btn engine-mode-toggle-btn ${currentAntigravityMode === 'api' ? 'active' : ''}" data-provider="antigravity" data-mode="api" title="Use Google Gemini API directly with your Gemini API Key">
-              ⚡ Gemini API
-            </button>
-          </div>
-          <div style="font-size:9.5px;color:#a1a1aa;margin-top:4px;line-height:1.35;" id="antigravityModePreviewNote">
-            ${currentAntigravityMode === 'api'
-              ? (currentGeminiApiKey ? '🟢 Gemini API mode active (Gemini Key configured).' : '⚠️ Gemini API selected without Google Gemini API Key. Configure in Settings.')
-              : '🟢 Local Terminal mode active (runs locally via Bridge).'}
-          </div>
-        </div>
-      `;
-    }
+    const pricing = getModelPricing(model.id);
+    const priceLine = (activeModelTab === 'antigravity' && !apiOnly && currentEngineIsLocal())
+      ? 'Local terminal · no per-token charge'
+      : `~${formatRate(pricing.in)} in · ${formatRate(pricing.out)} out per 1M tokens (estimate)`;
 
+    // The picker only describes the model: name, price and benchmarks. Reasoning and provider live elsewhere.
     previewCard.innerHTML = `
       <div class="preview-panel-content">
         <div class="preview-header">
@@ -2016,23 +1939,15 @@ marked.setOptions({
             <span class="preview-provider-tag">${providerName}</span>
           </div>
           <p class="preview-model-desc">${escapeHtml(model.desc || '')}</p>
+          <span class="preview-price-line">${escapeHtml(priceLine)}</span>
         </div>
 
-        <div class="preview-metrics-grid">
+        <div class="preview-metrics-grid" id="benchMetricsGrid">
           ${renderMetricBarHtml('INTELLIGENCE', adjustedIntel)}
           ${renderMetricBarHtml('SPEED', speed)}
           ${renderMetricBarHtml('CONTEXT', context, `${contextWin} context window`)}
           ${renderMetricBarHtml('EFFICIENCY', efficiency, 'Eficiencia computacional y de procesamiento')}
         </div>
-
-        <div class="preview-config-section">
-          <div class="preview-config-label">CONFIGURATION</div>
-          <div class="preview-config-sub">Reasoning</div>
-          <div class="segmented-radio-group" style="display:grid;grid-template-columns:repeat(${thinkingList.length}, minmax(0, 1fr));width:100%;gap:4px;">
-            ${radioButtonsHtml}
-          </div>
-        </div>
-        ${engineModeHtml}
       </div>
     `;
 
@@ -2042,107 +1957,331 @@ marked.setOptions({
         el.classList.add('grown');
       });
     });
+  }
 
-    // Wire up segmented radio buttons in the preview card
-    previewCard.querySelectorAll('.seg-radio-btn[data-effort]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const nextEffort = btn.getAttribute('data-effort');
-        if (model.id !== currentBaseModelId) {
-          currentBaseModelId = model.id;
-          activeProvider = model.usageGroup === 'gemini' ? 'gemini' : (isClaudeFamily ? 'claude' : 'chatgpt');
-        }
-        updateThinkingEffort(nextEffort);
-        renderModelPickerRows(modelSearchInput.value);
-        renderModelPreviewPanel(model, nextEffort);
-      });
+  // ─── Reasoning slider (button in the prompt box) ─────────────────────────────
+  function effortLabel(lvl) {
+    if (lvl === 'fast') return 'Fast';
+    if (lvl === 'x-high') return 'Extra';
+    if (lvl === 'thinking') return 'Thinking';
+    if (lvl === 'max') return 'Max';
+    return String(lvl).charAt(0).toUpperCase() + String(lvl).slice(1);
+  }
+
+  function getReasoningOptions() {
+    const m = getCurrentModelObject();
+    return (m && !m.isExternal && Array.isArray(m.thinking)) ? m.thinking : [];
+  }
+
+  let reasoningPendingIndex = null;
+  let reasoningChosen = false;
+  try { reasoningChosen = localStorage.getItem('autono_reasoning_chosen') === '1'; } catch (_) {}
+
+  function setReasoningChosen(value) {
+    reasoningChosen = value;
+    try { localStorage.setItem('autono_reasoning_chosen', value ? '1' : '0'); } catch (_) {}
+    updateReasoningButton();
+  }
+
+  // Grey "Reasoning" until the user picks a level; then blue and named after the level
+  function updateReasoningButton() {
+    const btn = document.getElementById('reasoningBtn');
+    const label = document.getElementById('reasoningBtnLabel');
+    if (!btn || !label) return;
+    const options = getReasoningOptions();
+    const chosen = reasoningChosen && options.includes(currentThinkingEffort);
+    btn.classList.toggle('active', chosen);
+    label.textContent = chosen ? effortLabel(currentThinkingEffort) : 'Reasoning';
+  }
+
+  function renderReasoningSlider(previewIndex = null) {
+    updateReasoningButton();
+    const panel = document.getElementById('reasoningPanel');
+    if (!panel) return;
+    const options = getReasoningOptions();
+    const slider = document.getElementById('reasoningSlider');
+    const empty = document.getElementById('reasoningEmpty');
+    const labelsEl = document.getElementById('reasoningLabels');
+    const stopsEl = document.getElementById('reasoningStops');
+    const thumb = document.getElementById('reasoningThumb');
+    const fill = document.getElementById('reasoningFill');
+    const current = document.getElementById('reasoningCurrent');
+    if (options.length < 2) {
+      slider.classList.add('hidden');
+      labelsEl.classList.add('hidden');
+      empty.classList.remove('hidden');
+      current.textContent = options[0] ? effortLabel(options[0]) : '';
+      return;
+    }
+    slider.classList.remove('hidden');
+    labelsEl.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    let idx = options.indexOf(currentThinkingEffort);
+    if (idx < 0) idx = Math.max(0, options.indexOf(getCurrentModelObject()?.defaultThinking));
+    const shown = previewIndex === null ? idx : previewIndex;
+    const pct = (i) => (i / (options.length - 1)) * 100;
+
+    stopsEl.innerHTML = options.map((_, i) => `<span class="reasoning-stop${i <= shown ? ' on' : ''}" style="left:${pct(i)}%"></span>`).join('');
+    labelsEl.innerHTML = options.map((o, i) => `<button type="button" class="reasoning-label${i === shown ? ' active' : ''}" data-index="${i}" style="left:${pct(i)}%">${effortLabel(o)}</button>`).join('');
+    labelsEl.querySelectorAll('.reasoning-label').forEach((btn) => {
+      btn.addEventListener('click', () => commitReasoning(parseInt(btn.dataset.index, 10)));
+    });
+    thumb.style.left = `${pct(shown)}%`;
+    fill.style.width = `${pct(shown)}%`;
+    thumb.setAttribute('data-label', effortLabel(options[shown]));
+    thumb.setAttribute('aria-valuetext', effortLabel(options[shown]));
+    current.textContent = effortLabel(options[shown]);
+  }
+
+  function commitReasoning(index) {
+    const options = getReasoningOptions();
+    setReasoningChosen(true);
+    const next = options[Math.max(0, Math.min(options.length - 1, index))];
+    if (next && next !== currentThinkingEffort) {
+      updateThinkingEffort(next); // re-renders the slider
+      const m = getCurrentModelObject();
+      if (m) renderModelPreviewPanel(m, next);
+    } else {
+      renderReasoningSlider();
+    }
+  }
+
+  (function wireReasoningSlider() {
+    const btn = document.getElementById('reasoningBtn');
+    const panel = document.getElementById('reasoningPanel');
+    const slider = document.getElementById('reasoningSlider');
+    const thumb = document.getElementById('reasoningThumb');
+    if (!btn || !panel || !slider || !thumb) return;
+    let dragging = false;
+
+    const indexFromEvent = (e) => {
+      const options = getReasoningOptions();
+      const rect = slider.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      return { frac, index: Math.round(frac * (options.length - 1)), count: options.length };
+    };
+
+    const follow = (e) => {
+      const { frac, index, count } = indexFromEvent(e);
+      if (count < 2) return;
+      reasoningPendingIndex = index;
+      const snapped = (index / (count - 1)) * 100;
+      thumb.style.left = `${snapped}%`;
+      document.getElementById('reasoningFill').style.width = `${snapped}%`;
+      renderReasoningLabelsOnly(index);
+    };
+
+    // While dragging the thumb snaps to the nearest level, so it never rests between two of them
+    function renderReasoningLabelsOnly(index) {
+      const options = getReasoningOptions();
+      document.querySelectorAll('#reasoningStops .reasoning-stop').forEach((el, i) => el.classList.toggle('on', i <= index));
+      document.querySelectorAll('#reasoningLabels .reasoning-label').forEach((el, i) => el.classList.toggle('active', i === index));
+      thumb.setAttribute('data-label', effortLabel(options[index]));
+      document.getElementById('reasoningCurrent').textContent = effortLabel(options[index]);
+    }
+
+    slider.addEventListener('pointerdown', (e) => {
+      if (getReasoningOptions().length < 2) return;
+      dragging = true;
+      slider.setPointerCapture(e.pointerId);
+      thumb.classList.add('dragging');
+      follow(e);
+    });
+    slider.addEventListener('pointermove', (e) => { if (dragging) follow(e); });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      thumb.classList.remove('dragging');
+      const idx = reasoningPendingIndex;
+      reasoningPendingIndex = null;
+      if (idx !== null) commitReasoning(idx);
+    };
+    slider.addEventListener('pointerup', end);
+    slider.addEventListener('pointercancel', end);
+
+    thumb.addEventListener('keydown', (e) => {
+      const options = getReasoningOptions();
+      const idx = Math.max(0, options.indexOf(currentThinkingEffort));
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); commitReasoning(idx + 1); }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); commitReasoning(idx - 1); }
     });
 
-    // Wire up Execution Engine buttons in preview card (Antigravity, Claude, OpenAI)
-    previewCard.querySelectorAll('.engine-mode-toggle-btn').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const prov = btn.getAttribute('data-provider');
-        const targetMode = btn.getAttribute('data-mode');
-        const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-        let configPayload = {};
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !open);
+      btn.classList.toggle('open', open);
+      if (open) {
+        renderReasoningSlider();
+        panel.classList.remove('reasoning-open');
+        void panel.offsetWidth; // restart the entrance animation
+        panel.classList.add('reasoning-open');
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!panel.classList.contains('hidden') && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
+        btn.classList.remove('open');
+      }
+    });
+  })();
 
-        if (prov === 'claude') {
-          currentClaudeMode = targetMode;
-          if (settingClaudeMode) settingClaudeMode.value = targetMode;
-          try { localStorage.setItem('antigravity_claude_mode', targetMode); } catch (_) {}
-          if (chrome.storage && chrome.storage.local) {
-            chrome.storage.local.get(['antigravity_settings'], (res) => {
-              const prev = res.antigravity_settings || {};
-              prev.claudeMode = targetMode;
-              chrome.storage.local.set({ antigravity_settings: prev, antigravity_claude_mode: targetMode });
-            });
-          }
-          configPayload.claude_mode = targetMode;
-          if (targetMode === 'api') {
-            if (!currentAnthropicApiKey) {
-              showToast('⚠️ Claude API active. Configure Anthropic API Key in Settings');
-            } else {
-              showToast('⚡ Claude API active');
-            }
-          } else {
-            showToast('💻 Local Terminal active');
-          }
-        } else if (prov === 'openai') {
-          currentOpenaiMode = targetMode;
-          if (settingOpenaiMode) settingOpenaiMode.value = targetMode;
-          try { localStorage.setItem('antigravity_openai_mode', targetMode); } catch (_) {}
-          if (chrome.storage && chrome.storage.local) {
-            chrome.storage.local.get(['antigravity_settings'], (res) => {
-              const prev = res.antigravity_settings || {};
-              prev.openaiMode = targetMode;
-              chrome.storage.local.set({ antigravity_settings: prev, antigravity_openai_mode: targetMode });
-            });
-          }
-          configPayload.openai_mode = targetMode;
-          if (targetMode === 'api') {
-            if (!currentOpenaiApiKey) {
-              showToast('⚠️ ChatGPT API active. Configure OpenAI Key in Settings');
-            } else {
-              showToast('⚡ ChatGPT API active');
-            }
-          } else {
-            showToast('💻 Local Terminal active');
-          }
-        } else {
-          // Antigravity
-          currentAntigravityMode = targetMode;
-          if (settingAntigravityMode) settingAntigravityMode.value = targetMode;
-          try { localStorage.setItem('antigravity_antigravity_mode', targetMode); } catch (_) {}
-          if (chrome.storage && chrome.storage.local) {
-            chrome.storage.local.get(['antigravity_settings'], (res) => {
-              const prev = res.antigravity_settings || {};
-              prev.antigravityMode = targetMode;
-              chrome.storage.local.set({ antigravity_settings: prev, antigravity_antigravity_mode: targetMode });
-            });
-          }
-          configPayload.antigravity_mode = targetMode;
-          if (targetMode === 'api') {
-            if (!currentGeminiApiKey) {
-              showToast('⚠️ Gemini API active. Configure Gemini Key in Settings');
-            } else {
-              showToast('⚡ Gemini API active');
-            }
-          } else {
-            showToast('💻 Local Terminal active');
-          }
-        }
+  // ─── Engine: Local Terminal or the provider's API ────────────────────────────
+  function getProviderContext() {
+    const id = currentBaseModelId || currentModel || '';
+    const modelObj = findModelByAnyId(id)?.model || null;
+    const gptOss = /gpt-oss/i.test(id);
+    const claude = isClaudeModel(id);
+    const openai = !claude && !gptOss && isOpenAIModel(id);
+    const prov = claude ? 'claude' : (openai ? 'openai' : 'antigravity');
+    const route = modelRoute || activeModelTab;
+    const forcedLocal = route === 'antigravity' && (claude || openai || gptOss);
+    const apiOnly = modelObj?.dynamicSource === 'gemini';
+    const stored = prov === 'claude' ? currentClaudeMode : (prov === 'openai' ? currentOpenaiMode : currentAntigravityMode);
+    const mode = forcedLocal ? 'desktop' : (apiOnly ? 'api' : (stored === 'api' ? 'api' : 'desktop'));
+    const apiName = prov === 'claude' ? 'Claude API' : (prov === 'openai' ? 'OpenAI API' : 'Gemini API');
+    const hasKey = prov === 'claude' ? !!currentAnthropicApiKey : (prov === 'openai' ? !!currentOpenaiApiKey : !!currentGeminiApiKey);
+    return { prov, mode, forcedLocal, apiOnly, apiName, hasKey };
+  }
 
-        fetch(`${bridgeUrl}/api/config`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(configPayload)
-        }).catch(() => null);
+  // Logo for an engine: Antigravity for its terminal, Gemini for its API, Claude Code / Codex for
+  // their local terminals, and the Claude / OpenAI logos for their APIs
+  function providerIconHtml(ctx, mode) {
+    const img = (src, alt) => `<img src="${src}" alt="${alt}">`;
+    if (ctx.forcedLocal && mode !== 'api') return img('../assets/antigravity-icon-32.png', 'Antigravity');
+    if (ctx.prov === 'claude') return mode === 'api' ? img('../assets/claude-icon-32.png', 'Claude API') : img('../assets/claude-code-logo.svg', 'Claude Code');
+    if (ctx.prov === 'openai') return mode === 'api' ? img('../assets/chatgpt-icon-32.png', 'OpenAI API') : img('../assets/codex-logo.svg', 'Codex');
+    return mode === 'api' ? img(getGeminiLogoSrc(), 'Gemini API') : img('../assets/antigravity-icon-32.png', 'Antigravity');
+  }
 
-        renderModelPreviewPanel(model, effort);
+  // Same engine choice as the Engine menu, one row per provider in Settings
+  function renderSettingsEngineChoices() {
+    document.querySelectorAll('.engine-choice-group').forEach((group) => {
+      const prov = group.dataset.prov;
+      const ctx = { prov, forcedLocal: false };
+      const stored = prov === 'claude' ? currentClaudeMode : (prov === 'openai' ? currentOpenaiMode : currentAntigravityMode);
+      const mode = stored === 'api' ? 'api' : 'desktop';
+      const apiName = prov === 'claude' ? 'Claude API' : (prov === 'openai' ? 'OpenAI API' : 'Gemini API');
+      const choice = (m, label) => `<button type="button" class="engine-choice${mode === m ? ' active' : ''}" data-mode="${m}"><span class="provider-option-icon">${providerIconHtml(ctx, m)}</span><span>${label}</span></button>`;
+      group.innerHTML = choice('desktop', 'Local Terminal') + choice('api', apiName);
+      group.querySelectorAll('.engine-choice').forEach((btn) => {
+        btn.addEventListener('click', () => applyProviderMode(prov, btn.dataset.mode));
       });
     });
   }
+
+  function updateProviderButton() {
+    renderSettingsEngineChoices();
+    const btn = document.getElementById('providerBtn');
+    if (!btn) return;
+    const ctx = getProviderContext();
+    btn.title = `Engine: ${ctx.mode === 'api' ? ctx.apiName : 'Local Terminal'}`;
+    const icon = document.getElementById('providerBtnIcon');
+    if (icon) icon.innerHTML = providerIconHtml(ctx, ctx.mode);
+  }
+
+  function renderProviderPopover() {
+    const pop = document.getElementById('providerPopover');
+    if (!pop) return;
+    const ctx = getProviderContext();
+    const localDisabled = ctx.apiOnly;
+    const apiDisabled = ctx.forcedLocal;
+    const note = ctx.forcedLocal
+      ? 'This model was picked under Antigravity, so it runs in the local terminal. Pick it from its own tab to use the official API.'
+      : (ctx.apiOnly ? 'Gemini API models only run through the API.' : (ctx.mode === 'api' && !ctx.hasKey ? `⚠️ Add your ${ctx.apiName} key in Settings.` : ''));
+    pop.innerHTML = `
+      <div class="provider-pop-title">Engine</div>
+      <button type="button" class="provider-option${ctx.mode === 'desktop' ? ' active' : ''}" data-mode="desktop" ${localDisabled ? 'disabled' : ''}>
+        <span class="provider-option-icon">${providerIconHtml(ctx, 'desktop')}</span>
+        <span class="provider-option-text">
+          <span class="provider-option-name">Local Terminal</span>
+          <span class="provider-option-sub">Runs through the Bridge with your own subscription</span>
+        </span>
+      </button>
+      <button type="button" class="provider-option${ctx.mode === 'api' ? ' active' : ''}" data-mode="api" ${apiDisabled ? 'disabled' : ''}>
+        <span class="provider-option-icon">${providerIconHtml(ctx, 'api')}</span>
+        <span class="provider-option-text">
+          <span class="provider-option-name">${escapeHtml(ctx.apiName)}</span>
+          <span class="provider-option-sub">Direct API call with your key</span>
+        </span>
+      </button>
+      ${note ? `<div class="provider-note">${escapeHtml(note)}</div>` : ''}`;
+    pop.querySelectorAll('.provider-option').forEach((opt) => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (opt.disabled) return;
+        applyProviderMode(ctx.prov, opt.getAttribute('data-mode'));
+        renderProviderPopover();
+      });
+    });
+  }
+
+  function applyProviderMode(prov, targetMode) {
+    const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+    const configPayload = {};
+    const persist = (field, storageKey, localKey) => {
+      try { localStorage.setItem(localKey, targetMode); } catch (_) {}
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['antigravity_settings'], (res) => {
+          const prev = res.antigravity_settings || {};
+          prev[field] = targetMode;
+          chrome.storage.local.set({ antigravity_settings: prev, [storageKey]: targetMode });
+        });
+      }
+    };
+
+    if (prov === 'claude') {
+      currentClaudeMode = targetMode;
+      if (settingClaudeMode) settingClaudeMode.value = targetMode;
+      persist('claudeMode', 'antigravity_claude_mode', 'antigravity_claude_mode');
+      configPayload.claude_mode = targetMode;
+      showToast(targetMode === 'api' ? (currentAnthropicApiKey ? '⚡ Claude API active' : '⚠️ Claude API active. Configure Anthropic API Key in Settings') : '💻 Local Terminal active');
+    } else if (prov === 'openai') {
+      currentOpenaiMode = targetMode;
+      if (settingOpenaiMode) settingOpenaiMode.value = targetMode;
+      persist('openaiMode', 'antigravity_openai_mode', 'antigravity_openai_mode');
+      configPayload.openai_mode = targetMode;
+      showToast(targetMode === 'api' ? (currentOpenaiApiKey ? '⚡ OpenAI API active' : '⚠️ OpenAI API active. Configure OpenAI Key in Settings') : '💻 Local Terminal active');
+    } else {
+      currentAntigravityMode = targetMode;
+      if (settingAntigravityMode) settingAntigravityMode.value = targetMode;
+      persist('antigravityMode', 'antigravity_antigravity_mode', 'antigravity_antigravity_mode');
+      configPayload.antigravity_mode = targetMode;
+      showToast(targetMode === 'api' ? (currentGeminiApiKey ? '⚡ Gemini API active' : '⚠️ Gemini API active. Configure Gemini Key in Settings') : '💻 Local Terminal active');
+    }
+
+    fetch(`${bridgeUrl}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(configPayload),
+    }).catch(() => null);
+
+    updateProviderButton();
+    updateContextMeter();
+    const m = getCurrentModelObject();
+    if (m) renderModelPreviewPanel(m, currentThinkingEffort);
+  }
+
+  (function wireProviderButton() {
+    const btn = document.getElementById('providerBtn');
+    const pop = document.getElementById('providerPopover');
+    if (!btn || !pop) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = pop.classList.contains('hidden');
+      pop.classList.toggle('hidden', !open);
+      if (open) {
+        closeModelPicker();
+        renderProviderPopover();
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!pop.classList.contains('hidden') && !pop.contains(e.target) && !btn.contains(e.target)) {
+        pop.classList.add('hidden');
+      }
+    });
+  })();
 
   let geminiLogoSrcCache = '';
   function getGeminiLogoSrc() {
@@ -2323,6 +2462,9 @@ marked.setOptions({
   }
 
   function openModelPicker() {
+    document.getElementById('providerPopover')?.classList.add('hidden');
+    document.getElementById('reasoningPanel')?.classList.add('hidden');
+    document.getElementById('reasoningBtn')?.classList.remove('open');
     modelPickerTrigger.classList.add('open');
     modelPickerPopover.classList.remove('hidden');
     if (modelRoute) {
@@ -2498,6 +2640,8 @@ marked.setOptions({
       tagBridgeTab(group[group.length - 1]);
       added++;
     });
+    // the price list follows the model list (it is not ready yet while the panel is still starting up)
+    try { renderPricingSettings(); } catch (_) { /* later */ }
     return added;
   }
 
@@ -2597,14 +2741,21 @@ marked.setOptions({
 
   function pruneModelGroups() {
     const openaiGroup = PROVIDER_DATA.chatgpt.models;
-    if (openaiGroup.some((m) => m.dynamicSource === 'bridge' || m.bridgeMatched)) {
-      for (let i = openaiGroup.length - 1; i >= 0; i--) {
-        if (!openaiGroup[i].dynamicSource && !openaiGroup[i].bridgeMatched) openaiGroup.splice(i, 1);
-      }
+    for (let i = openaiGroup.length - 1; i >= 0; i--) {
+      if (!isAllowedOpenAiModel(openaiGroup[i].id)) openaiGroup.splice(i, 1);
     }
     // Claude / OpenAI: newest per family; models the Bridge assigns to Antigravity (local terminal) are kept as-is
     pruneGroup(PROVIDER_DATA.claude.models, () => true, isLocalAntigravityModel);
     pruneGroup(PROVIDER_DATA.chatgpt.models, () => true, isLocalAntigravityModel);
+    // GPT-6 must always offer Astra, Sol, Luna and Terra, whatever the Bridge or the API reported
+    GPT6_REQUIRED.forEach((req) => {
+      const tier = openAiModelInfo(req.id).tier;
+      const present = PROVIDER_DATA.chatgpt.models.some((m) => {
+        const info = openAiModelInfo(m.id);
+        return info && info.major === 6 && info.tier === tier;
+      });
+      if (!present) PROVIDER_DATA.chatgpt.models.unshift({ ...req });
+    });
     // Gemini: the local (Antigravity) list is never trimmed; only the API section uses the "newest" rule
     pruneGroup(PROVIDER_DATA.gemini.models, (m) => m.dynamicSource === 'gemini', () => false);
   }
@@ -2813,10 +2964,862 @@ marked.setOptions({
   });
 
   // ─── PromptInputBox Tools Toggles ───────────────────────────────────────────
-  toggleSearchBtn.addEventListener('click', () => {
-    isSearchActive = !isSearchActive;
-    toggleSearchBtn.classList.toggle('active', isSearchActive);
+  // ─── Voice: Piper text-to-speech, run by the Bridge ─────────────────────────
+  const PIPER_VOICE_KEY = 'autono_piper_voice';
+  const PIPER_AUTO_KEY = 'autono_piper_auto';
+  const PIPER_SPEED_KEY = 'autono_piper_speed';
+  const LANG_NAMES = { en: 'English', es: 'Español', pt: 'Português', fr: 'Français', de: 'Deutsch', zh: '中文' };
+  let piperPoll = null;
+  let piperAudio = null;
+  let piperVoices = [];
+
+  function bridgeBase() {
+    return (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '').replace(/\/v1$/, '');
+  }
+
+  async function piperApi(path, options) {
+    const res = await fetch(`${bridgeBase()}${path}`, options);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).detail || ''; } catch (_) { /* not JSON */ }
+      const err = new Error(detail || `Bridge answered ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res;
+  }
+
+  // With a fixed language the voice list is for that language; with auto-detect you pick one voice for each
+  function piperLang() {
+    const fixed = dictationLanguage();
+    if (fixed !== 'auto') return fixed;
+    const chosen = document.getElementById('piperVoiceLangSelect')?.value;
+    return chosen === 'en' || chosen === 'es' ? chosen : 'es';
+  }
+
+  const savedVoiceFor = (lang) => {
+    const own = localStorage.getItem(PIPER_VOICE_KEY + '_' + lang);
+    if (own) return own;
+    const legacy = localStorage.getItem(PIPER_VOICE_KEY);
+    return legacy && legacy.startsWith(lang + '_') ? legacy : '';
+  };
+
+  // Spanish or English? Accents, ñ, ¿¡ and common words decide
+  function guessTextLanguage(text) {
+    const sample = String(text || '').slice(0, 600).toLowerCase();
+    if (/[ñ¿¡áéíóú]/.test(sample)) return 'es';
+    const es = (sample.match(/\b(el|la|los|las|de|que|y|en|un|una|es|para|con|por|como|pero|más|esto|puedes|hola)\b/g) || []).length;
+    const en = (sample.match(/\b(the|and|of|to|is|in|that|for|with|this|you|are|can|it|your|hello)\b/g) || []).length;
+    return es > en ? 'es' : 'en';
+  }
+
+  function voiceForText(text) {
+    const fixed = dictationLanguage();
+    const lang = fixed === 'auto' ? guessTextLanguage(text) : fixed;
+    return savedVoiceFor(lang) || savedVoiceFor(lang === 'es' ? 'en' : 'es');
+  }
+
+  function setPiperStatus(text, tone = '') {
+    const el = document.getElementById('piperStatus');
+    if (el) { el.textContent = text; el.className = `piper-status ${tone}`.trim(); }
+  }
+
+  async function piperRefresh() {
+    const installBtn = document.getElementById('piperInstallBtn');
+    const controls = document.getElementById('piperControls');
+    if (!installBtn || !controls) return;
+    clearTimeout(piperPoll);
+    let status;
+    try {
+      status = await (await piperApi('/v1/tts/status')).json();
+    } catch (err) {
+      installBtn.classList.add('hidden');
+      controls.classList.add('hidden');
+      setPiperStatus(err.status === 404
+        ? 'Your Bridge is too old for voices. Close it and open it again (or run Actualizar-AntigravityBridge).'
+        : 'The Bridge is not running, so there is nothing to speak with.', 'bad');
+      return;
+    }
+    if (!status.engine_installed) {
+      controls.classList.add('hidden');
+      installBtn.classList.remove('hidden');
+      installBtn.disabled = status.engine_installing;
+      if (status.engine_installing) {
+        setPiperStatus('Installing the voice engine… this takes about a minute.');
+        piperPoll = setTimeout(piperRefresh, 2000);
+      } else {
+        setPiperStatus(status.engine_error ? `The engine could not be installed: ${status.engine_error}` : 'The voice engine is not installed yet.', status.engine_error ? 'bad' : '');
+      }
+      return;
+    }
+    installBtn.classList.add('hidden');
+    controls.classList.remove('hidden');
+    document.getElementById('piperLangName').textContent = LANG_NAMES[piperLang()] || piperLang();
+    document.getElementById('piperVoiceLangField')?.classList.toggle('hidden', dictationLanguage() !== 'auto');
+    try {
+      piperVoices = (await (await piperApi(`/v1/tts/voices?lang=${encodeURIComponent(piperLang())}`)).json()).voices || [];
+    } catch (err) {
+      setPiperStatus(`Could not load the voice list: ${err.message}`, 'bad');
+      return;
+    }
+    renderPiperVoices(status);
+  }
+
+  function renderPiperVoices(status) {
+    const select = document.getElementById('piperVoiceSelect');
+    const saved = savedVoiceFor(piperLang());
+    const previous = saved || select.value;
+    select.innerHTML = piperVoices.map((v) => {
+      const mark = v.installed ? '✓ ' : '';
+      return `<option value="${escapeHtml(v.key)}">${mark}${escapeHtml(v.name)} · ${escapeHtml(v.country || v.language)} · ${escapeHtml(v.quality)} · ${v.size_mb} MB</option>`;
+    }).join('');
+    if (previous && piperVoices.some((v) => v.key === previous)) select.value = previous;
+    else {
+      const firstInstalled = piperVoices.find((v) => v.installed);
+      if (firstInstalled) select.value = firstInstalled.key;
+    }
+    updatePiperButtons(status);
+  }
+
+  function updatePiperButtons(status) {
+    const select = document.getElementById('piperVoiceSelect');
+    const voice = piperVoices.find((v) => v.key === select.value);
+    const download = status?.downloads?.[select.value];
+    const busy = download && download.state === 'downloading';
+    document.getElementById('piperDownloadBtn').disabled = !voice || voice.installed || busy;
+    document.getElementById('piperTestBtn').disabled = !voice || !voice.installed;
+    document.getElementById('piperDeleteBtn').disabled = !voice || !voice.installed;
+    const progress = document.getElementById('piperProgress');
+    progress.classList.toggle('hidden', !busy);
+    if (busy) {
+      const pct = download.total ? Math.min(100, Math.round((download.done / download.total) * 100)) : 0;
+      const bar = document.getElementById('piperProgressBar');
+      bar.style.width = `${Math.max(pct, 3)}%`;
+      bar.classList.toggle('indeterminate', !download.total);
+      const mb = (n) => (n / 1048576).toFixed(1);
+      setPiperStatus(`Downloading ${voice?.name || select.value}… ${download.total ? `${pct}% (${mb(download.done)} of ${mb(download.total)} MB)` : ''}`);
+      piperPoll = setTimeout(piperRefresh, 1000);
+    } else if (download && download.state === 'error') {
+      setPiperStatus(`The download failed: ${download.error}`, 'bad');
+    } else if (voice && voice.installed) {
+      localStorage.setItem(PIPER_VOICE_KEY + '_' + (voice.language_code || voice.key.slice(0, 2)), voice.key);
+      setPiperStatus(`Ready: ${voice.name} will read your answers.`, 'ok');
+    } else {
+      setPiperStatus('Pick a voice and download it. Each one is a one-time download.');
+    }
+  }
+
+  document.getElementById('piperInstallBtn')?.addEventListener('click', async () => {
+    try {
+      await piperApi('/v1/tts/engine/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      piperRefresh();
+    } catch (err) {
+      setPiperStatus(`Could not start the install: ${err.message}`, 'bad');
+    }
   });
+  document.getElementById('piperVoiceSelect')?.addEventListener('change', () => piperRefresh());
+  document.getElementById('piperRefreshBtn')?.addEventListener('click', () => {
+    setPiperStatus('Updating the voice list…');
+    piperRefresh();
+  });
+  document.getElementById('piperDownloadBtn')?.addEventListener('click', async () => {
+    const key = document.getElementById('piperVoiceSelect').value;
+    try {
+      await piperApi('/v1/tts/voices/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: key }) });
+      piperRefresh();
+    } catch (err) {
+      setPiperStatus(`Could not start the download: ${err.message}`, 'bad');
+    }
+  });
+  document.getElementById('piperDeleteBtn')?.addEventListener('click', async () => {
+    const key = document.getElementById('piperVoiceSelect').value;
+    try {
+      await piperApi(`/v1/tts/voices/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      ['en', 'es'].forEach((l) => { if (localStorage.getItem(PIPER_VOICE_KEY + '_' + l) === key) localStorage.removeItem(PIPER_VOICE_KEY + '_' + l); });
+      if (localStorage.getItem(PIPER_VOICE_KEY) === key) localStorage.removeItem(PIPER_VOICE_KEY);
+      piperRefresh();
+    } catch (err) {
+      setPiperStatus(`Could not delete it: ${err.message}`, 'bad');
+    }
+  });
+  document.getElementById('piperTestBtn')?.addEventListener('click', () => {
+    const sample = { en: 'Hello, I am Autono. I can read your answers aloud.', es: 'Hola, soy Autono. Puedo leerte las respuestas en voz alta.', pt: 'Olá, eu sou o Autono. Posso ler as respostas em voz alta.', fr: 'Bonjour, je suis Autono. Je peux lire vos réponses à voix haute.', de: 'Hallo, ich bin Autono. Ich kann dir die Antworten vorlesen.', zh: '你好，我是 Autono。我可以为你朗读回答。' };
+    speakText(sample[piperLang()] || sample.en, document.getElementById('piperVoiceSelect').value);
+  });
+  const piperSpeedSelect = document.getElementById('piperSpeed');
+  const piperAutoToggle = document.getElementById('piperAutoRead');
+  if (piperSpeedSelect) {
+    piperSpeedSelect.value = localStorage.getItem(PIPER_SPEED_KEY) || '1';
+    piperSpeedSelect.addEventListener('change', () => localStorage.setItem(PIPER_SPEED_KEY, piperSpeedSelect.value));
+  }
+  if (piperAutoToggle) {
+    piperAutoToggle.checked = localStorage.getItem(PIPER_AUTO_KEY) === '1';
+    piperAutoToggle.addEventListener('change', () => localStorage.setItem(PIPER_AUTO_KEY, piperAutoToggle.checked ? '1' : '0'));
+  }
+  document.getElementById('piperVoiceLangSelect')?.addEventListener('change', () => piperRefresh());
+  document.getElementById('dictationLangSelect')?.addEventListener('change', () => {
+    if (!settingsModal.classList.contains('hidden')) piperRefresh();
+  });
+
+  // What is worth reading aloud: no code, no tags, no markdown symbols
+  function speakableText(raw) {
+    return String(raw || '')
+      .replace(/<(thought|think)>[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<(next_steps_suggestions|approval_card|agent_run|mascot_note|spawn_agents)>[\s\S]*?(<\/\1>|$)/gi, ' ')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/^\s*[|:\-\s]+$/gm, ' ')
+      .replace(/[#*_>|~]+/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 5000);
+  }
+
+  function stopSpeaking() {
+    if (piperAudio) {
+      piperAudio.pause();
+      piperAudio = null;
+    }
+    document.querySelectorAll('.streaming-action-btn.speaking').forEach((b) => b.classList.remove('speaking'));
+  }
+
+  // Asks the Bridge to speak and plays the WAV it sends back. Returns true if it started.
+  async function speakText(raw, voiceOverride) {
+    const text = voiceOverride ? raw : speakableText(raw);
+    const voice = voiceOverride || voiceForText(text);
+    if (!voice) {
+      showToast('Pick and download a voice in Settings → Voice first.');
+      return false;
+    }
+    if (!text) return false;
+    stopSpeaking();
+    try {
+      const res = await piperApi('/v1/tts/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice, speed: parseFloat(localStorage.getItem(PIPER_SPEED_KEY) || '1') }),
+      });
+      const url = URL.createObjectURL(await res.blob());
+      const audio = new Audio(url);
+      piperAudio = audio;
+      audio.addEventListener('ended', () => { URL.revokeObjectURL(url); if (piperAudio === audio) piperAudio = null; stopSpeaking(); });
+      await audio.play();
+      return true;
+    } catch (err) {
+      showToast(err.status === 409 ? 'Install the voice engine in Settings → Voice first.' : `Could not speak: ${err.message}`);
+      return false;
+    }
+  }
+
+  // ─── Dictation (speech to text) ─────────────────────────────────────────────
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const DICTATION_LANGS = { en: 'en-US', es: 'es-ES', pt: 'pt-BR', fr: 'fr-FR', de: 'de-DE', zh: 'zh-CN' };
+  let recognizer = null;
+  let dictating = false;
+
+  function dictationLang() {
+    const lang = dictationLanguage();
+    if (lang === 'auto') return navigator.language || 'en-US';
+    return DICTATION_LANGS[lang] || 'en-US';
+  }
+
+  function setDictating(on) {
+    dictating = on;
+    if (micBtn) {
+      micBtn.classList.toggle('listening', on);
+      micBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      micBtn.title = on ? 'Listening… click to stop' : 'Dictate (click to start, click again to stop)';
+    }
+  }
+
+  // ─── Dictation bar: live sound waves, the words heard so far (ghost text) and a "working" state ───
+  const dictationBar = document.getElementById('dictationBar');
+  const dictationWave = document.getElementById('dictationWave');
+  const dictationStateEl = document.getElementById('dictationState');
+  const dictationGhostEl = document.getElementById('dictationGhost');
+  let dictationStarting = false;
+  let dictationFinishing = false; // after "stop": the last words are still being turned into text
+
+  function showDictationBar(state) {
+    if (!dictationBar) return;
+    dictationBar.classList.toggle('hidden', !state);
+    dictationBar.classList.toggle('working', state === 'working');
+    if (dictationStateEl) dictationStateEl.textContent = state === 'working' ? 'Turning your voice into text…' : 'Listening…';
+    if (!state) setGhost('');
+    dictationFinishing = state === 'working';
+    if (micBtn) micBtn.classList.toggle('transcribing', dictationFinishing);
+  }
+
+  function setGhost(text) {
+    if (!dictationGhostEl) return;
+    const clean = String(text || '').trim();
+    dictationGhostEl.textContent = clean.length > 240 ? '…' + clean.slice(-240) : clean;
+    dictationGhostEl.classList.toggle('hidden', !clean);
+  }
+
+  // Draws a scrolling bar graph of the microphone level on the canvas. Returns a function that stops it.
+  function startWaveform(analyser) {
+    if (!dictationWave || !analyser) return () => {};
+    const ctx = dictationWave.getContext('2d');
+    const data = new Uint8Array(analyser.fftSize);
+    const BAR = 3, GAP = 2;
+    let levels = [];
+    let raf = 0;
+    let lastPush = 0;
+    const draw = (now) => {
+      raf = requestAnimationFrame(draw);
+      const width = dictationWave.clientWidth || 280;
+      const height = dictationWave.clientHeight || 34;
+      if (dictationWave.width !== width * 2) { dictationWave.width = width * 2; dictationWave.height = height * 2; }
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+      const level = Math.min(1, Math.sqrt(sum / data.length) * 5);
+      if (now - lastPush > 55) { levels.push(level); lastPush = now; }
+      const slots = Math.floor((width * 2) / ((BAR + GAP) * 2));
+      if (levels.length > slots) levels = levels.slice(levels.length - slots);
+      ctx.clearRect(0, 0, dictationWave.width, dictationWave.height);
+      ctx.fillStyle = getComputedStyle(dictationWave).color || '#38bdf8';
+      const mid = dictationWave.height / 2;
+      levels.forEach((l, i) => {
+        const h = Math.max(4, l * dictationWave.height * 0.9);
+        const x = dictationWave.width - (levels.length - i) * (BAR + GAP) * 2;
+        ctx.globalAlpha = 0.35 + 0.65 * (i / Math.max(1, levels.length));
+        ctx.fillRect(x, mid - h / 2, BAR * 2, h);
+      });
+      ctx.globalAlpha = 1;
+    };
+    raf = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(raf); ctx.clearRect(0, 0, dictationWave.width, dictationWave.height); };
+  }
+
+  // The words come out of the box only when dictation ends: write them in and say so
+  function commitDictation(base, spoken) {
+    const text = String(spoken || '').trim();
+    showDictationBar(null);
+    if (text) {
+      promptInput.value = base + text;
+      handleInputStateChange();
+      showToast('Done');
+    } else {
+      showToast('I did not hear anything.');
+    }
+    promptInput.focus();
+  }
+
+  // The side panel cannot show the microphone prompt by itself: a normal tab asks once and Chrome remembers it
+  function openMicPermissionPage() {
+    chrome.tabs.create({ url: chrome.runtime.getURL('side-panel/mic-permission.html') });
+    showToast('Allow the microphone in the tab that just opened, then click the mic again.');
+  }
+
+  function stopDictation() {
+    if (whisperRun) stopWhisperDictation();
+    if (recognizer) {
+      showDictationBar('working');
+      try { recognizer.stop(); } catch (_) { /* already stopped */ }
+    }
+  }
+
+  // ─── Local Whisper (whisper.cpp compiled to WebAssembly, runs inside the panel) ───
+  const WHISPER_ENGINE_KEY = 'autono_dictation_engine';
+  const WHISPER_MODEL_KEY = 'autono_whisper_model';
+  const DICT_LANG_KEY = 'autono_dictation_lang';
+  // Whisper Tiny (multilingual, 31 MB, MIT) ships inside the extension
+  const WHISPER_MODEL_PATH = 'vendor/whisper/models/ggml-tiny-q5_1.bin';
+  const WHISPER_LOAD_TIMEOUT_MS = 60000;
+  const WHISPER_DOWNLOADED_KEY = 'autono_whisper_downloaded';
+  let whisperEngine = null; // { service, modelId }
+  let whisperRun = null; // the dictation in progress
+  let whisperQueue = Promise.resolve();
+  let whisperPending = 0;
+
+  function whisperDownloaded() {
+    try { return JSON.parse(localStorage.getItem(WHISPER_DOWNLOADED_KEY) || '[]'); } catch (_) { return []; }
+  }
+
+  function whisperModelId() {
+    return localStorage.getItem(WHISPER_MODEL_KEY) || 'tiny-q5_1';
+  }
+
+  // Local Whisper is the default; the browser engine is only used when chosen (or as a fallback when Whisper cannot run)
+  function whisperReady() {
+    return localStorage.getItem(WHISPER_ENGINE_KEY) !== 'browser';
+  }
+
+  // English and Spanish for now; more languages are coming
+  // The language of your voice and of the voice that reads answers: 'en', 'es' or 'auto' (detect it)
+  function dictationLanguage() {
+    const saved = localStorage.getItem(DICT_LANG_KEY);
+    if (saved === 'en' || saved === 'es' || saved === 'auto') return saved;
+    const response = document.getElementById('settingAgentLanguage')?.value;
+    return response === 'en' || response === 'es' ? response : 'auto';
+  }
+
+  // Whisper runs WebAssembly threads, which Chrome only gives to pages that are cross-origin isolated
+  function whisperPreflight() {
+    if (typeof WebAssembly !== 'object') return 'WebAssembly is not available in this browser.';
+    if (!self.crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
+      return 'Chrome is not giving this panel the threads Whisper needs. Open chrome://extensions and press Reload on Autono, then try again.';
+    }
+    return '';
+  }
+
+  async function loadWhisper() {
+    const modelId = 'tiny-q5_1';
+    if (whisperEngine && whisperEngine.modelId === modelId) return whisperEngine;
+    const problem = whisperPreflight();
+    if (problem) throw new Error(problem);
+    const load = (async () => {
+      const lib = await import('../vendor/whisper/index.es.js');
+      const res = await fetch(chrome.runtime.getURL(WHISPER_MODEL_PATH));
+      if (!res.ok) throw new Error('The Whisper model file is missing from the extension (' + res.status + ').');
+      const data = new Uint8Array(await res.arrayBuffer());
+      const service = new lib.WhisperWasmService({ logLevel: 3 });
+      await service.initModel(data);
+      return { service, modelId };
+    })();
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Loading the Whisper model took too long.')), WHISPER_LOAD_TIMEOUT_MS));
+    whisperEngine = await Promise.race([load, timeout]);
+    return whisperEngine;
+  }
+
+  async function transcribeWhisper(samples) {
+    const { service } = await loadWhisper();
+    const threads = Math.max(2, Math.min(8, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
+    let text = '';
+    for await (const part of service.createSession().streaming(samples, { language: dictationLanguage(), threads, translate: false, sleepMsBetweenChunks: 0 })) {
+      text += part.text;
+    }
+    return cleanTranscript(text);
+  }
+
+  // ─── Parakeet (NVIDIA, English + Spanish) runs in the Bridge; the panel only records and sends 16 kHz audio ───
+  function samplesToWav(samples) {
+    const pcm = new DataView(new ArrayBuffer(44 + samples.length * 2));
+    const text = (offset, s) => { for (let i = 0; i < s.length; i++) pcm.setUint8(offset + i, s.charCodeAt(i)); };
+    text(0, 'RIFF'); pcm.setUint32(4, 36 + samples.length * 2, true); text(8, 'WAVE'); text(12, 'fmt ');
+    pcm.setUint32(16, 16, true); pcm.setUint16(20, 1, true); pcm.setUint16(22, 1, true);
+    pcm.setUint32(24, SAMPLE_RATE, true); pcm.setUint32(28, SAMPLE_RATE * 2, true); pcm.setUint16(32, 2, true); pcm.setUint16(34, 16, true);
+    text(36, 'data'); pcm.setUint32(40, samples.length * 2, true);
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.max(-1, Math.min(1, samples[i]));
+      pcm.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+    return pcm.buffer;
+  }
+
+  const bufferToBase64 = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  };
+
+  // Talk to the Bridge's speech routes. The panel asks directly; if the browser refuses that request (for example
+  // because of cross-origin rules), the extension's background worker, which is not subject to them, asks instead.
+  async function sttRequest(path, { method = 'GET', body, contentType, timeoutMs = 60000 } = {}) {
+    let direct;
+    try {
+      const res = await fetch(`${bridgeBase()}${path}`, {
+        method, body, headers: contentType ? { 'Content-Type': contentType } : undefined, signal: AbortSignal.timeout(timeoutMs),
+      });
+      return { ok: res.ok, status: res.status, text: await res.text() };
+    } catch (err) {
+      direct = err;
+    }
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'bridge_relay', path, method, contentType, bodyB64: body ? bufferToBase64(body instanceof ArrayBuffer ? body : new TextEncoder().encode(String(body))) : undefined }, (reply) => {
+          const lastError = chrome.runtime.lastError;
+          resolve(reply && reply.status !== undefined ? reply : { ok: false, status: 0, text: '', error: (reply && reply.error) || (lastError && lastError.message) || (direct && direct.message) || 'no answer' });
+        });
+      } catch (err) {
+        resolve({ ok: false, status: 0, text: '', error: err.message || String(direct) });
+      }
+    });
+  }
+
+  async function sttJson(path, options) {
+    const res = await sttRequest(path, options);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = JSON.parse(res.text).detail || ''; } catch (_) { /* not JSON */ }
+      const err = new Error(detail || res.error || `Bridge answered ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    try { return JSON.parse(res.text || '{}'); } catch (_) { return {}; }
+  }
+
+  async function transcribeParakeet(samples) {
+    const data = await sttJson('/v1/stt/transcribe', { method: 'POST', contentType: 'audio/wav', body: samplesToWav(samples) });
+    return cleanTranscript(data.text || '');
+  }
+
+  // Is Parakeet usable right now? Says why not, so the message is never a mystery
+  async function parakeetCheck() {
+    const base = bridgeBase();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await sttRequest('/v1/stt/status', { timeoutMs: 4000 });
+        if (res.status === 0) throw new Error(res.error || 'no answer');
+        if (res.status === 404) return { ready: false, reason: `the Bridge at ${base} does not know speech yet: restart or update it (Settings → Updates and Bridge)` };
+        if (!res.ok) return { ready: false, reason: `the Bridge answered ${res.status}` };
+        const status = JSON.parse(res.text || '{}');
+        if (!status.engine_installed) return { ready: false, reason: 'the speech engine is not installed (Settings → Dictation)' };
+        if (!status.model_installed) return { ready: false, reason: 'the model is not downloaded (Settings → Dictation)' };
+        return { ready: true, reason: '' };
+      } catch (err) {
+        if (attempt === 1) return { ready: false, reason: `cannot reach the Bridge at ${base} (${err.message || err})` };
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+    return { ready: false, reason: 'unknown' };
+  }
+
+  // What the Settings select shows: the saved choice, or Parakeet (the recommended one) when nothing was chosen
+  function dictationEnginePreference() {
+    const saved = localStorage.getItem(WHISPER_ENGINE_KEY);
+    return saved === 'browser' || saved === 'whisper' ? saved : 'parakeet';
+  }
+
+  // What is actually used right now: Parakeet when it is ready, else Whisper Tiny, else the browser
+  async function pickDictationEngine() {
+    const preferred = dictationEnginePreference();
+    if (preferred === 'browser') return 'browser';
+    if (preferred === 'parakeet') {
+      const check = await parakeetCheck();
+      if (check.ready) return 'parakeet';
+      if (localStorage.getItem(WHISPER_ENGINE_KEY) === 'parakeet') showToast(`Parakeet is not ready: ${check.reason}. Using Whisper Tiny.`, 9000);
+    }
+    return 'whisper';
+  }
+
+  const transcribeSamples = (samples, engine) => (engine === 'parakeet' ? transcribeParakeet(samples) : transcribeWhisper(samples));
+
+  function showTranscribing() {
+    if (micBtn) micBtn.classList.toggle('transcribing', dictationFinishing);
+  }
+
+  function queueTranscription(samples, run) {
+    whisperPending++;
+    showTranscribing();
+    whisperQueue = whisperQueue.then(async () => {
+      try {
+        const text = await transcribeSamples(samples, run.engine);
+        if (text) {
+          run.text = (run.text ? run.text + ' ' : '') + text;
+          setGhost(run.text);
+        }
+      } catch (err) {
+        console.warn('Whisper failed:', err);
+        showToast('Dictation failed: ' + (err.message || err));
+      } finally {
+        whisperPending--;
+        showTranscribing();
+      }
+    });
+    return whisperQueue;
+  }
+
+  async function startLocalDictation(engine) {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    } catch (err) {
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) openMicPermissionPage();
+      else showToast('No microphone found.');
+      return;
+    }
+    const context = new AudioContext({ sampleRate: SAMPLE_RATE });
+    if (context.state === 'suspended') await context.resume();
+    await context.audioWorklet.addModule(chrome.runtime.getURL('side-panel/pcm-worklet.js'));
+    const source = context.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(context, 'pcm-collector');
+    const segmenter = new SpeechSegmenter();
+    const base = promptInput.value ? promptInput.value.replace(/\s*$/, ' ') : '';
+    const run = { stream, context, node, source, segmenter, base, text: '', engine };
+    whisperRun = run;
+    node.port.onmessage = (event) => {
+      for (const phrase of segmenter.push(event.data)) queueTranscription(phrase, run);
+    };
+    source.connect(node);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    showDictationBar('listening');
+    run.stopWave = startWaveform(analyser);
+    setDictating(true);
+    // load the model while the user starts talking (the first load takes a few seconds)
+    const warmUp = engine === 'parakeet' ? transcribeParakeet(new Float32Array(SAMPLE_RATE)) : loadWhisper();
+    warmUp.catch((err) => {
+      showToast((engine === 'parakeet' ? 'Parakeet' : 'Whisper') + ' could not load: ' + (err.message || err));
+      whisperEngine = null;
+      stopWhisperDictation();
+    });
+  }
+
+  async function stopWhisperDictation() {
+    const run = whisperRun;
+    if (!run) return;
+    whisperRun = null;
+    run.node.port.onmessage = null;
+    run.source.disconnect();
+    run.stream.getTracks().forEach((t) => t.stop());
+    run.context.close().catch(() => null);
+    setDictating(false);
+    if (run.stopWave) run.stopWave();
+    showDictationBar('working');
+    const last = run.segmenter.flush();
+    if (last) queueTranscription(last, run);
+    await whisperQueue;
+    commitDictation(run.base, run.text);
+  }
+
+  async function startDictation() {
+    if (dictationFinishing || dictationStarting) return;
+    dictationStarting = true;
+    try {
+      const engine = await pickDictationEngine();
+      if (engine === 'browser') { startBrowserDictation(); return; }
+      if (engine === 'whisper') {
+        const problem = whisperPreflight();
+        if (problem) {
+          showToast(problem + ' Using the browser dictation meanwhile.');
+          startBrowserDictation();
+          return;
+        }
+      }
+      try {
+        await startLocalDictation(engine);
+      } catch (err) {
+        setDictating(false);
+        showDictationBar(null);
+        showToast(engine + ' could not start (' + (err.message || err) + '). Using the browser dictation.');
+        startBrowserDictation();
+      }
+    } finally {
+      dictationStarting = false;
+    }
+  }
+
+  function startBrowserDictation() {
+    if (!SpeechRecognitionCtor) {
+      showToast('Dictation is not available in this browser.');
+      return;
+    }
+    const rec = new SpeechRecognitionCtor();
+    rec.lang = dictationLang();
+    rec.continuous = true;
+    rec.interimResults = true;
+    const base = promptInput.value ? promptInput.value.replace(/\s*$/, ' ') : '';
+    let heard = '';
+    let stopWave = () => {};
+    let waveStream = null;
+
+    rec.onresult = (event) => {
+      let spoken = '';
+      for (let i = 0; i < event.results.length; i++) spoken += event.results[i][0].transcript;
+      heard = spoken.trimStart();
+      setGhost(heard);
+    };
+    rec.onerror = (event) => {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') openMicPermissionPage();
+      else if (event.error === 'audio-capture') showToast('No microphone found.');
+      else if (event.error === 'network') showToast('Dictation needs an internet connection.');
+      // "no-speech" and "aborted" just end the session
+    };
+    rec.onend = () => {
+      setDictating(false);
+      recognizer = null;
+      stopWave();
+      if (waveStream) waveStream.getTracks().forEach((t) => t.stop());
+      commitDictation(base, heard);
+    };
+    try {
+      rec.start();
+      recognizer = rec;
+      setDictating(true);
+      showDictationBar('listening');
+      // the sound waves come from a second look at the microphone
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        if (!recognizer) { stream.getTracks().forEach((t) => t.stop()); return; }
+        waveStream = stream;
+        const ctx = new AudioContext();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const stopDraw = startWaveform(analyser);
+        stopWave = () => { stopDraw(); ctx.close().catch(() => null); };
+      }).catch(() => null);
+    } catch (err) {
+      setDictating(false);
+      showDictationBar(null);
+      showToast('Could not start dictation: ' + (err.message || err));
+    }
+  }
+
+  // ─── Dictation settings: engine (Parakeet via the Bridge / Whisper built in / browser), language, tests ───
+  function setWhisperStatus(text, tone = '') {
+    const el = document.getElementById('whisperStatus');
+    if (el) { el.textContent = text; el.className = `piper-status ${tone}`.trim(); }
+  }
+
+  function setParakeetStatus(text, tone = '') {
+    const el = document.getElementById('parakeetStatus');
+    if (el) { el.textContent = text; el.className = `piper-status ${tone}`.trim(); }
+  }
+
+  let parakeetPoll = null;
+
+  async function parakeetRefresh() {
+    clearTimeout(parakeetPoll);
+    const panel = document.getElementById('parakeetPanel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    const installBtn = document.getElementById('parakeetInstallBtn');
+    const downloadBtn = document.getElementById('parakeetDownloadBtn');
+    const testBtn = document.getElementById('parakeetTestBtn');
+    const deleteBtn = document.getElementById('parakeetDeleteBtn');
+    const progress = document.getElementById('parakeetProgress');
+    const bar = document.getElementById('parakeetProgressBar');
+    let s;
+    try {
+      s = await sttJson('/v1/stt/status');
+    } catch (err) {
+      [installBtn, downloadBtn, testBtn, deleteBtn].forEach((b) => b.classList.add('hidden'));
+      progress.classList.add('hidden');
+      setParakeetStatus(err.status === 404
+        ? 'Your Bridge is too old for this. Use "Restart the Bridge" or "Update" below, then come back.'
+        : 'The Bridge is not running, so Parakeet is not available. Whisper Tiny is used meanwhile.', 'bad');
+      return;
+    }
+    const dl = s.download || {};
+    const busy = dl.state === 'downloading';
+    installBtn.classList.toggle('hidden', s.engine_installed);
+    installBtn.disabled = s.engine_installing;
+    downloadBtn.classList.toggle('hidden', !s.engine_installed || s.model_installed);
+    downloadBtn.disabled = busy;
+    testBtn.classList.toggle('hidden', !(s.engine_installed && s.model_installed));
+    deleteBtn.classList.toggle('hidden', !s.model_installed && !busy);
+    deleteBtn.disabled = busy;
+    progress.classList.toggle('hidden', !(busy || s.engine_installing));
+    if (s.engine_installing) {
+      bar.classList.add('indeterminate');
+      setParakeetStatus('Installing the speech engine… about a minute.');
+      parakeetPoll = setTimeout(parakeetRefresh, 2000);
+    } else if (!s.engine_installed) {
+      setParakeetStatus(s.engine_error ? `The engine could not be installed: ${s.engine_error}` : 'Step 1 of 2: install the speech engine (about 150 MB).', s.engine_error ? 'bad' : '');
+    } else if (busy) {
+      const pct = dl.total ? Math.min(100, Math.round((dl.done / dl.total) * 100)) : 0;
+      bar.classList.remove('indeterminate');
+      bar.style.width = `${Math.max(pct, 3)}%`;
+      const mb = (n) => (n / 1048576).toFixed(0);
+      setParakeetStatus(`Downloading the model… ${pct}% (${mb(dl.done)} of ${mb(dl.total)} MB). You can keep using Autono.`);
+      parakeetPoll = setTimeout(parakeetRefresh, 1000);
+    } else if (dl.state === 'error') {
+      setParakeetStatus(`The download failed: ${dl.error}`, 'bad');
+    } else if (!s.model_installed) {
+      setParakeetStatus('Step 2 of 2: download the model (about 650 MB, one time).');
+    } else {
+      setParakeetStatus('Ready: Parakeet understands English and Spanish by itself and is used for dictation.', 'ok');
+    }
+  }
+
+  function renderWhisperSettings() {
+    const engineSelect = document.getElementById('whisperEngineSelect');
+    const langSelect = document.getElementById('dictationLangSelect');
+    if (!engineSelect) return;
+    engineSelect.value = dictationEnginePreference();
+    if (langSelect) langSelect.value = dictationLanguage();
+    document.getElementById('parakeetPanel')?.classList.toggle('hidden', engineSelect.value !== 'parakeet');
+    document.getElementById('whisperLocal')?.classList.toggle('hidden', engineSelect.value !== 'whisper');
+    if (engineSelect.value === 'parakeet') parakeetRefresh();
+    if (engineSelect.value === 'whisper') {
+      const problem = whisperPreflight();
+      setWhisperStatus(problem || 'Whisper Tiny is built into Autono: nothing to download, and your voice never leaves this computer. Press "Test dictation" to check it.', problem ? 'bad' : '');
+    }
+  }
+
+  document.getElementById('whisperEngineSelect')?.addEventListener('change', (e) => {
+    localStorage.setItem(WHISPER_ENGINE_KEY, e.target.value);
+    renderWhisperSettings();
+  });
+  document.getElementById('dictationLangSelect')?.addEventListener('change', (e) => {
+    localStorage.setItem(DICT_LANG_KEY, e.target.value);
+  });
+  document.getElementById('whisperTestBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('whisperTestBtn');
+    button.disabled = true;
+    try {
+      const problem = whisperPreflight();
+      if (problem) throw new Error(problem);
+      setWhisperStatus('Loading the Whisper model…');
+      const started = performance.now();
+      whisperEngine = null;
+      await loadWhisper();
+      setWhisperStatus('Model loaded. Running a short test…');
+      await transcribeWhisper(new Float32Array(SAMPLE_RATE)); // one second of silence
+      setWhisperStatus(`Dictation works: the model loaded and ran in ${((performance.now() - started) / 1000).toFixed(1)} s.`, 'ok');
+    } catch (err) {
+      setWhisperStatus(`Dictation failed: ${err.message || err}`, 'bad');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.getElementById('parakeetInstallBtn')?.addEventListener('click', async () => {
+    try {
+      await sttJson('/v1/stt/engine/install', { method: 'POST', contentType: 'application/json', body: '{}' });
+      parakeetRefresh();
+    } catch (err) {
+      setParakeetStatus(`Could not start the install: ${err.message}`, 'bad');
+    }
+  });
+  document.getElementById('parakeetDownloadBtn')?.addEventListener('click', async () => {
+    try {
+      await sttJson('/v1/stt/model/download', { method: 'POST', contentType: 'application/json', body: '{}' });
+      parakeetRefresh();
+    } catch (err) {
+      setParakeetStatus(`Could not start the download: ${err.message}`, 'bad');
+    }
+  });
+  document.getElementById('parakeetDeleteBtn')?.addEventListener('click', async () => {
+    try {
+      await sttJson('/v1/stt/model', { method: 'DELETE' });
+      parakeetRefresh();
+    } catch (err) {
+      setParakeetStatus(`Could not delete it: ${err.message}`, 'bad');
+    }
+  });
+  document.getElementById('parakeetTestBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('parakeetTestBtn');
+    button.disabled = true;
+    setParakeetStatus('Loading Parakeet and running a short test…');
+    try {
+      const started = performance.now();
+      await transcribeParakeet(new Float32Array(SAMPLE_RATE * 2));
+      setParakeetStatus(`Dictation works: Parakeet loaded and ran in ${((performance.now() - started) / 1000).toFixed(1)} s.`, 'ok');
+    } catch (err) {
+      setParakeetStatus(`Dictation failed: ${err.message || err}`, 'bad');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  // The panel is cross-origin isolated (local Whisper needs it), so a remote image whose server does not allow
+  // embedding cannot load: hide it instead of showing a broken-image icon.
+  document.addEventListener('error', (e) => {
+    const el = e.target;
+    if (el && el.tagName === 'IMG' && /^https?:/i.test(el.getAttribute('src') || '')) el.style.visibility = 'hidden';
+  }, true);
+
+  if (micBtn) {
+    micBtn.addEventListener('click', () => (dictating ? stopDictation() : startDictation()));
+  }
 
   toggleCoworkBtn.addEventListener('click', () => {
     isCoworkActive = !isCoworkActive;
@@ -3198,12 +4201,15 @@ marked.setOptions({
 
     let searchCardHtml = '';
 
+    if (dictating) stopDictation();
+    stopSpeaking();
     lastUserPrompt = text;
     lastAttachedItems = Array.isArray(attachedItems) ? [...attachedItems] : [];
     lastSearchSources = [];
 
     // If Search is active, perform TinyFish search!
-    if (isSearchActive && text) {
+    // (greetings and slash commands are not worth a web search)
+    if (isSearchActive && text && text.length >= 8 && !text.startsWith('/')) {
       showLiveActivity('🔍 Buscando en la web con TinyFish AI...');
       try {
         const searchResp = await searchWithTinyFish(text, {
@@ -4969,7 +5975,9 @@ marked.setOptions({
 
   function applyLoadedSettings(s) {
     if (settingBridgeUrl) {
-      settingBridgeUrl.value = s.bridgeUrl || 'http://127.0.0.1:8765';
+      // the Bridge moved from port 8000 to 8765 long ago: fix an address saved by an old version
+      const savedUrl = /^https?:\/\/(127\.0\.0\.1|localhost):8000\/?$/i.test(s.bridgeUrl || '') ? s.bridgeUrl.replace(':8000', ':8765').replace(/\/$/, '') : s.bridgeUrl;
+      settingBridgeUrl.value = savedUrl || 'http://127.0.0.1:8765';
       refreshMcpSnippet();
     }
     if (settingMaxSteps) settingMaxSteps.value = s.maxSteps || 30;
@@ -5086,6 +6094,12 @@ marked.setOptions({
 
     const workingOverlayInput = document.getElementById('settingWorkingOverlay');
     if (workingOverlayInput && s.workingOverlay !== undefined) workingOverlayInput.checked = Boolean(s.workingOverlay);
+    const multiAgentInput = document.getElementById('settingMultiAgent');
+    if (multiAgentInput) multiAgentInput.checked = Boolean(s.multiAgent);
+    const mascotInput = document.getElementById('settingMascot');
+    if (mascotInput) mascotInput.checked = s.mascot !== false;
+    const agentConfirmInput = document.getElementById('settingAgentConfirm');
+    if (agentConfirmInput) agentConfirmInput.checked = s.agentConfirm !== false;
 
     const tabLockedSidebarInput = document.getElementById('settingTabLockedSidebar');
     if (tabLockedSidebarInput && s.tabLockedSidebar !== undefined) tabLockedSidebarInput.checked = Boolean(s.tabLockedSidebar);
@@ -5489,6 +6503,44 @@ marked.setOptions({
     });
   }
 
+  // ─── User Settings → Preferences: the same controls as the other tabs, kept in sync both ways ───
+  // (the originals keep working and keep being what Save reads; these just change them)
+  function syncUserPrefs() {
+    document.querySelectorAll('[data-mirror]').forEach((mirror) => {
+      const src = document.getElementById(mirror.dataset.mirror);
+      if (!src) { mirror.closest('.setting-field, .setting-field-toggle')?.classList.add('hidden'); return; }
+      if (mirror.tagName === 'SELECT') {
+        if (mirror.options.length !== src.options.length || mirror.dataset.sig !== Array.from(src.options).map((o) => o.value).join('|')) {
+          mirror.innerHTML = src.innerHTML;
+          mirror.dataset.sig = Array.from(src.options).map((o) => o.value).join('|');
+        }
+        mirror.value = src.value;
+      } else if (mirror.type === 'checkbox') {
+        mirror.checked = src.checked;
+      } else {
+        mirror.value = src.value;
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-mirror]').forEach((mirror) => {
+    const src = document.getElementById(mirror.dataset.mirror);
+    if (!src) return;
+    const push = () => {
+      if (mirror.type === 'checkbox') src.checked = mirror.checked;
+      else src.value = mirror.value;
+      src.dispatchEvent(new Event('input', { bubbles: true }));
+      src.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    mirror.addEventListener(mirror.tagName === 'SELECT' || mirror.type === 'checkbox' ? 'change' : 'input', push);
+    src.addEventListener('change', () => { if (document.activeElement !== mirror) syncUserPrefs(); });
+  });
+
+  document.getElementById('userRerunSetupBtn')?.addEventListener('click', () => {
+    settingsModal.classList.add('hidden');
+    openOnboarding();
+  });
+
   // Open / Close Settings Modal
   settingsBtn.addEventListener('click', () => {
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
@@ -5501,6 +6553,28 @@ marked.setOptions({
     renderSkillChips();
     renderMcpServersList();
     renderExternalProvidersList();
+    renderSettingsEngineChoices();
+    renderPricingSettings();
+    piperRefresh();
+    renderWhisperSettings();
+    checkForUpdates({ force: false });
+    syncUserPrefs();
+  });
+
+  // The mascot switch applies immediately (no need to press Save)
+  document.getElementById('settingMascot')?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    chrome.storage.local.get(['antigravity_settings'], (res) => {
+      const prev = res.antigravity_settings || {};
+      prev.mascot = on;
+      chrome.storage.local.set({ antigravity_settings: prev });
+    });
+  });
+
+  document.getElementById('mascotTestBtn')?.addEventListener('click', () => {
+    // Preview uses the saved settings only for the test; it shows the "done" animation on the tab behind the panel
+    chrome.runtime.sendMessage({ type: 'mascot_test' }, () => void chrome.runtime.lastError);
+    showToast('Look at the page you have open: the mascot should appear.');
   });
 
   closeSettingsBtn.addEventListener('click', () => {
@@ -5578,6 +6652,9 @@ marked.setOptions({
       shadowOnComplete: document.getElementById('settingShadowOnComplete')?.value || 'sleep',
       tabGrouping: document.getElementById('settingTabGrouping')?.checked ?? true,
       workingOverlay: document.getElementById('settingWorkingOverlay')?.checked ?? true,
+      multiAgent: document.getElementById('settingMultiAgent')?.checked ?? false,
+      agentConfirm: document.getElementById('settingAgentConfirm')?.checked ?? true,
+      mascot: document.getElementById('settingMascot')?.checked ?? true,
       tabLockedSidebar: document.getElementById('settingTabLockedSidebar')?.checked ?? false,
       waitMessageSentOutInstantly: document.getElementById('settingWaitMessageSentOutInstantly')?.checked ?? true,
       localMcpBridgeEnabled: document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false,
@@ -6245,7 +7322,7 @@ You are a world-class principal software engineer.
     },
     {
       name: '/teamwork',
-      desc: 'Coordinate multi-agent workflow for parallel tasks',
+      desc: 'Run this request with parallel sub-agents',
       tag: 'Team',
       prefix: '/teamwork ',
       enabled: true,
@@ -6608,6 +7685,350 @@ You are a world-class principal software engineer.
     });
   }
 
+  // ─── Model pricing (USD per 1M tokens: input / output) ──────────────────────
+  // List prices from the providers' own pricing pages, checked on 2026-10-07:
+  //   Anthropic  https://platform.claude.com/docs/en/about-claude/pricing
+  //   Google     https://ai.google.dev/gemini-api/docs/pricing
+  //   OpenAI     https://developers.openai.com/api/docs/pricing
+  // They are only used for ESTIMATES (never a real bill) and the user can edit every price in Settings.
+  // Rules are matched in order against the model id with "." turned into "-".
+  const PRICING_CHECKED_ON = '2026-10-07';
+  const MODEL_PRICING = [
+    { key: 'claude-fable', label: 'Claude Fable / Mythos', re: /(fable|mythos)/, in: 10, out: 50 },
+    { key: 'claude-opus-5-5', label: 'Claude Opus 5.5', re: /opus-5-5/, in: 4, out: 20 },
+    { key: 'claude-opus', label: 'Claude Opus (other)', re: /opus/, in: 5, out: 25 },
+    { key: 'claude-sonnet-5', label: 'Claude Sonnet 5 / 5.5', re: /sonnet-5/, in: 2, out: 10 },
+    { key: 'claude-sonnet', label: 'Claude Sonnet (older)', re: /sonnet/, in: 3, out: 15 },
+    { key: 'claude-haiku-5', label: 'Claude Haiku 5.5 (prompts up to 100k)', re: /haiku-5/, in: 0.1, out: 0.5 },
+    { key: 'claude-haiku', label: 'Claude Haiku 4.5', re: /haiku/, in: 1, out: 5 },
+    { key: 'claude-other', label: 'Claude (other)', re: /claude/, in: 3, out: 15 },
+    { key: 'gpt-6-astra', label: 'GPT-6 Astra', re: /gpt-6-astra/, in: 10, out: 50 },
+    { key: 'gpt-6-sol', label: 'GPT-6 Sol', re: /gpt-6(-1)?-sol/, in: 2, out: 10 },
+    { key: 'gpt-6-luna', label: 'GPT-6 Luna', re: /gpt-6-luna/, in: 0.1, out: 0.5 },
+    { key: 'gpt-5-6-sol', label: 'GPT-5.6 Sol (promo until 2026-11-21)', re: /gpt-5-6-sol/, in: 4, out: 20 },
+    { key: 'gpt-5-6-terra', label: 'GPT-5.6 Terra', re: /gpt-5-6-terra/, in: 2, out: 12 },
+    { key: 'gpt-5-6-luna', label: 'GPT-5.6 Luna', re: /gpt-5-6-luna/, in: 0.2, out: 1.2 },
+    { key: 'gpt-5-5', label: 'GPT-5.5', re: /gpt-5-5/, in: 5, out: 30 },
+    { key: 'gpt-5-4', label: 'GPT-5.4', re: /gpt-5-4/, in: 2.5, out: 15 },
+    { key: 'codex', label: 'Codex', re: /codex/, in: 1.75, out: 14 },
+    { key: 'gpt-oss', label: 'GPT-OSS (no official price found)', re: /gpt-oss/, in: 0.15, out: 0.6 },
+    { key: 'o3-mini', label: 'o3-mini', re: /o3-mini/, in: 1.1, out: 4.4 },
+    { key: 'o3', label: 'o3', re: /(^|-)o3/, in: 2, out: 8 },
+    { key: 'gpt-5', label: 'GPT-5', re: /gpt-5/, in: 1.25, out: 10 },
+    { key: 'gemini-pro', label: 'Gemini 3.1 Pro (up to 200k)', re: /gemini.*pro/, in: 2, out: 12 },
+    { key: 'gemini-flash-lite', label: 'Gemini Flash-Lite', re: /flash-lite/, in: 0.25, out: 1.5 },
+    { key: 'gemini-flash', label: 'Gemini 3.6 / 3.7 / 3.8 Flash (promo until 2026-12-31)', re: /gemini/, in: 0.75, out: 3.75 },
+  ];
+  const PRICE_OVERRIDES_KEY = 'autono_price_overrides';
+
+  // ─── Updates and Bridge hard reset ────────────────────────────────────────────────────────────────
+  const UPDATE_PATH_KEY = 'autono_extension_path';
+  const UPDATE_DISMISS_KEY = 'autono_update_dismissed';
+  let updateState = null;
+  let updateBusy = false;
+
+  const shortSha = (sha) => (sha ? String(sha).slice(0, 7) : '?');
+
+  function setUpdateProgress(pct, text) {
+    const wrap = document.getElementById('updateProgress');
+    const bar = document.getElementById('updateProgressBar');
+    if (wrap) wrap.classList.toggle('hidden', pct === null);
+    if (bar && pct !== null) {
+      bar.classList.toggle('indeterminate', pct < 0);
+      bar.style.width = `${pct < 0 ? 100 : Math.max(3, pct)}%`;
+    }
+    const line = document.getElementById('updateStatusLines');
+    if (line && text) { line.textContent = text; line.className = 'piper-status'; }
+    const banner = document.getElementById('updateBannerText');
+    if (banner && text && updateBusy) banner.textContent = text;
+  }
+
+  function renderUpdateStatus() {
+    const line = document.getElementById('updateStatusLines');
+    const applyBtn = document.getElementById('updateApplyBtn');
+    const banner = document.getElementById('updateBanner');
+    if (!line || !updateState) return;
+    const { bridge, extension } = updateState;
+    const version = chrome.runtime.getManifest().version;
+    const parts = [
+      `Autono ${version}: ${extension?.error ? extension.error : extension?.update_available ? 'a new version is available' : 'up to date'}`,
+      `Bridge: ${bridge?.error ? bridge.error : bridge?.update_available ? 'a new version is available' : 'up to date'}`,
+    ];
+    const pending = Boolean(extension?.update_available || bridge?.update_available);
+    line.textContent = parts.join('\n');
+    line.style.whiteSpace = 'pre-line';
+    line.className = 'piper-status' + (pending ? '' : ' ok');
+    applyBtn?.classList.toggle('hidden', !pending);
+    const key = `${extension?.latest || ''}|${bridge?.latest || ''}`;
+    let dismissed = '';
+    try { dismissed = sessionStorage.getItem(UPDATE_DISMISS_KEY) || ''; } catch (_) { /* ignore */ }
+    const text = document.getElementById('updateBannerText');
+    if (text && !updateBusy) {
+      text.textContent = extension?.update_available && bridge?.update_available ? 'New update available for Autono and the Bridge'
+        : extension?.update_available ? 'New update available for Autono' : 'New update available for the Bridge';
+    }
+    banner?.classList.toggle('hidden', !(pending && dismissed !== key) && !updateBusy);
+  }
+
+  async function checkForUpdates({ force = false, silent = false } = {}) {
+    const line = document.getElementById('updateStatusLines');
+    if (updateBusy) return;
+    if (!silent && line) { line.textContent = 'Checking…'; line.className = 'piper-status'; }
+    try {
+      const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
+      const url = `/v1/update/status?ext_id=${encodeURIComponent(chrome.runtime.id)}&force=${force ? 'true' : 'false'}&ext_path=${encodeURIComponent(folder)}`;
+      updateState = await (await piperApi(url)).json();
+      renderUpdateStatus();
+    } catch (err) {
+      updateState = null;
+      if (line) {
+        line.style.whiteSpace = '';
+        line.textContent = err.status === 404
+          ? 'Your Bridge is too old to update itself. Run Reiniciar-Servicio-Fondo.bat once (or Actualizar-AntigravityBridge.bat), then check again.'
+          : 'The Bridge is not running, so updates cannot be checked.';
+        line.className = 'piper-status bad';
+      }
+      document.getElementById('updateApplyBtn')?.classList.add('hidden');
+    }
+  }
+
+  async function waitForBridge(minUptimeOk = true, timeoutMs = 90000) {
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, 2500));
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const res = await fetch(`${bridgeBase()}/health`, { signal: AbortSignal.timeout(2500) });
+        if (res.ok) {
+          const health = await res.json();
+          if (!minUptimeOk || (health.uptime_seconds ?? 999) < 60) return health;
+        }
+      } catch (_) { /* still restarting */ }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return null;
+  }
+
+  async function restartBridgeHard() {
+    const btn = document.getElementById('bridgeRestartBtn');
+    if (updateBusy) return;
+    updateBusy = true;
+    if (btn) btn.disabled = true;
+    try {
+      setUpdateProgress(-1, 'Closing the Bridge and opening it again…');
+      try {
+        await piperApi('/v1/bridge/restart', { method: 'POST' });
+      } catch (err) {
+        if (err.status === 404) throw new Error('This Bridge is too old to restart itself. Run Reiniciar-Servicio-Fondo.bat once.');
+        // a refused connection means it is not running at all: nothing to close
+        if (err.status) throw err;
+        throw new Error('The Bridge is not running. Open Iniciar-Servicio-Fondo.bat (or Reiniciar-Servicio-Fondo.bat) to start it.');
+      }
+      const health = await waitForBridge(true);
+      if (!health) throw new Error('The Bridge did not come back. Run Reiniciar-Servicio-Fondo.bat.');
+      setUpdateProgress(null, 'The Bridge was restarted and is ready.');
+      showToast('Bridge restarted');
+      sendPortMessage({ type: 'ping_bridge' });
+      piperRefresh();
+    } catch (err) {
+      setUpdateProgress(null, err.message);
+      document.getElementById('updateStatusLines')?.classList.add('bad');
+    } finally {
+      updateBusy = false;
+      if (btn) btn.disabled = false;
+      renderUpdateStatus();
+    }
+  }
+
+  async function applyUpdates() {
+    if (updateBusy || !updateState) return;
+    const doExt = Boolean(updateState.extension?.update_available);
+    const doBridge = Boolean(updateState.bridge?.update_available);
+    updateBusy = true;
+    document.getElementById('updateBanner')?.classList.remove('hidden');
+    const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
+    try {
+      if (doBridge) {
+        setUpdateProgress(-1, 'Updating the Bridge…');
+        await piperApi('/v1/update/bridge', { method: 'POST' });
+        setUpdateProgress(-1, 'Restarting the Bridge with the new code…');
+        const health = await waitForBridge(true);
+        if (!health) throw new Error('The Bridge did not come back after updating. Run Reiniciar-Servicio-Fondo.bat.');
+      }
+      if (doExt) {
+        setUpdateProgress(-1, 'Updating Autono…');
+        await piperApi('/v1/update/extension', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ext_id: chrome.runtime.id, ext_path: folder }),
+        });
+        setUpdateProgress(100, 'Updated. Reloading Autono…');
+        try { await chrome.storage.local.set({ autono_just_updated: Date.now() }); } catch (_) { /* ignore */ }
+        setTimeout(() => chrome.runtime.reload(), 900);
+        return;
+      }
+      setUpdateProgress(100, 'The Bridge was updated and restarted.');
+      showToast('Bridge updated');
+      updateBusy = false;
+      await checkForUpdates({ force: true });
+    } catch (err) {
+      updateBusy = false;
+      setUpdateProgress(null, `The update failed: ${err.message}`);
+      document.getElementById('updateStatusLines')?.classList.add('bad');
+      document.getElementById('updateBanner')?.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('updateCheckBtn')?.addEventListener('click', () => checkForUpdates({ force: true }));
+  document.getElementById('updateApplyBtn')?.addEventListener('click', applyUpdates);
+  document.getElementById('updateBannerBtn')?.addEventListener('click', applyUpdates);
+  document.getElementById('bridgeRestartBtn')?.addEventListener('click', restartBridgeHard);
+  document.getElementById('updateBannerClose')?.addEventListener('click', () => {
+    document.getElementById('updateBanner')?.classList.add('hidden');
+    try {
+      sessionStorage.setItem(UPDATE_DISMISS_KEY, `${updateState?.extension?.latest || ''}|${updateState?.bridge?.latest || ''}`);
+    } catch (_) { /* ignore */ }
+  });
+  const updatePathInput = document.getElementById('updatePathInput');
+  if (updatePathInput) {
+    updatePathInput.value = localStorage.getItem(UPDATE_PATH_KEY) || '';
+    updatePathInput.addEventListener('change', () => {
+      try { localStorage.setItem(UPDATE_PATH_KEY, updatePathInput.value.trim()); } catch (_) { /* ignore */ }
+    });
+  }
+  // Every time the panel opens: look for something new (quietly), and welcome the user back after an update
+  chrome.storage.local.get(['autono_just_updated'], (res) => {
+    if (res?.autono_just_updated && Date.now() - res.autono_just_updated < 5 * 60 * 1000) {
+      showToast(`Autono was updated to the latest version (${chrome.runtime.getManifest().version})`);
+    }
+    chrome.storage.local.remove('autono_just_updated');
+  });
+  setTimeout(() => checkForUpdates({ force: true, silent: true }), 2500);
+
+  function loadPriceOverrides() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(PRICE_OVERRIDES_KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function savePriceOverrides(overrides) {
+    try { localStorage.setItem(PRICE_OVERRIDES_KEY, JSON.stringify(overrides)); } catch (_) {}
+  }
+
+  function normalizePriceId(modelId) {
+    return String(modelId || '').toLowerCase().replace(/\./g, '-');
+  }
+
+  function getModelPricing(modelId) {
+    const id = normalizePriceId(modelId);
+    const rule = MODEL_PRICING.find((r) => r.re.test(id));
+    const edited = loadPriceOverrides()[rule ? rule.key : id];
+    if (edited && Number.isFinite(edited.in) && Number.isFinite(edited.out)) {
+      return { in: edited.in, out: edited.out, known: Boolean(rule), edited: true };
+    }
+    if (!rule) return { in: 1, out: 5, known: false };
+    return { in: rule.in, out: rule.out, known: true };
+  }
+
+  // The rows follow the models the Bridge really offers (the same list as the model picker), so there is never
+  // a price for a model you cannot use, and a model without a known price still gets an editable row.
+  function pricedModelGroups() {
+    const groups = new Map();
+    const seen = new Set();
+    for (const p of Object.values(PROVIDER_DATA)) {
+      for (const m of (p.models || [])) {
+        if (!m || !m.id || seen.has(m.id)) continue;
+        seen.add(m.id);
+        const id = normalizePriceId(m.id);
+        const rule = MODEL_PRICING.find((r) => r.re.test(id));
+        const key = rule ? rule.key : id;
+        if (!groups.has(key)) groups.set(key, { key, rule, names: [] });
+        const group = groups.get(key);
+        const name = String(m.name || m.id).replace(/\s*\((low|medium|high|x-high|max|none|minimal)\)\s*$/i, '');
+        if (!group.names.includes(name)) group.names.push(name);
+      }
+    }
+    return [...groups.values()];
+  }
+
+  function renderPricingSettings() {
+    const box = document.getElementById('pricingTable');
+    if (!box) return;
+    const overrides = loadPriceOverrides();
+    const groups = pricedModelGroups();
+    if (!groups.length) {
+      box.innerHTML = '<div class="field-hint">No models are loaded yet. Open the Bridge and reopen Settings.</div>';
+      return;
+    }
+    box.innerHTML = groups.map((g) => {
+      const o = overrides[g.key];
+      const base = g.rule || { in: 1, out: 5 };
+      const inV = o ? o.in : base.in;
+      const outV = o ? o.out : base.out;
+      const title = g.rule ? g.rule.label : `${g.names[0]} (no official price found)`;
+      const used = g.names.slice(0, 6).join(', ') + (g.names.length > 6 ? ` +${g.names.length - 6}` : '');
+      return `<div class="price-row${o ? ' edited' : ''}" data-key="${escapeHtml(g.key)}" data-in="${base.in}" data-out="${base.out}">
+        <span class="price-name">${escapeHtml(title)}<small class="price-used">${escapeHtml(used)}</small></span>
+        <input type="number" class="price-in" min="0" step="0.01" value="${inV}" aria-label="Input price per million tokens">
+        <input type="number" class="price-out" min="0" step="0.01" value="${outV}" aria-label="Output price per million tokens">
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.price-row').forEach((row) => {
+      const save = () => {
+        const pin = parseFloat(row.querySelector('.price-in').value);
+        const pout = parseFloat(row.querySelector('.price-out').value);
+        if (!Number.isFinite(pin) || !Number.isFinite(pout) || pin < 0 || pout < 0) return;
+        const next = loadPriceOverrides();
+        if (pin === Number(row.dataset.in) && pout === Number(row.dataset.out)) delete next[row.dataset.key];
+        else next[row.dataset.key] = { in: pin, out: pout };
+        savePriceOverrides(next);
+        row.classList.toggle('edited', Boolean(next[row.dataset.key]));
+        updateContextMeter();
+      };
+      row.querySelectorAll('input').forEach((inp) => inp.addEventListener('change', save));
+    });
+    const stamp = document.getElementById('pricingCheckedOn');
+    if (stamp) stamp.textContent = PRICING_CHECKED_ON;
+  }
+
+  const resetPricesBtn = document.getElementById('resetPricesBtn');
+  if (resetPricesBtn) {
+    resetPricesBtn.addEventListener('click', () => {
+      savePriceOverrides({});
+      renderPricingSettings();
+      updateContextMeter();
+      showToast('Prices reset to the list prices');
+    });
+  }
+  renderPricingSettings();
+
+  function formatUsd(value) {
+    if (!value || value <= 0) return '$0';
+    if (value < 0.001) return '<$0.001';
+    if (value < 0.1) return '$' + value.toFixed(3);
+    if (value < 100) return '$' + value.toFixed(2);
+    return '$' + Math.round(value);
+  }
+
+  function formatRate(n) {
+    return '$' + (n >= 1 ? String(Math.round(n * 100) / 100) : String(n));
+  }
+
+  function estimateTextTokens(text) {
+    return Math.ceil(String(text || '').length / 4);
+  }
+
+  // True when the current model runs through the local terminal (no per-token billing)
+  function currentEngineIsLocal() {
+    const id = currentModel || '';
+    const obj = (findModelByAnyId(id)?.model || null);
+    if (obj && obj.dynamicSource === 'gemini') return false;
+    if (isClaudeModel(id)) return activeModelTab === 'antigravity' || currentClaudeMode !== 'api';
+    if (isOpenAIModel(id)) return activeModelTab === 'antigravity' || currentOpenaiMode !== 'api';
+    return currentAntigravityMode !== 'api';
+  }
+
   // ─── AI Context Meter Helpers & Updates ─────────────────────────────────────
   function formatTokens(tokens) {
     if (tokens >= 1000000) {
@@ -6639,12 +8060,24 @@ You are a world-class principal software engineer.
       fileTokens += Math.round(len / 4);
     });
 
+    // Conversation tokens + estimated spend so far (each answer re-reads the whole history as input)
+    const pricing = getModelPricing(currentModel);
+    const inRate = pricing.in / 1e6;
+    const outRate = pricing.out / 1e6;
     let convTokens = 0;
+    let sessionCost = 0;
     const activeSession = allSessions.find((s) => s.id === currentSessionId);
     if (activeSession && Array.isArray(activeSession.messages)) {
       activeSession.messages.forEach((m) => {
         const text = (m.content || '') + (m.intro || '') + (m.summary || '');
-        convTokens += Math.round(text.length / 4);
+        const t = estimateTextTokens(text);
+        if (m.role === 'assistant') {
+          sessionCost += (sysTokens + convTokens) * inRate + t * outRate;
+        }
+        if (m.agentUsage) {
+          sessionCost += (m.agentUsage.inputTokens || 0) * inRate + (m.agentUsage.outputTokens || 0) * outRate;
+        }
+        convTokens += t;
       });
     }
 
@@ -6665,20 +8098,30 @@ You are a world-class principal software engineer.
 
     contextMeterLabel.textContent = `${formatTokens(used)}/${formatTokens(limit)}`;
 
-    const pctBadge = document.getElementById('meterPercentBadge');
-    if (pctBadge) {
-      pctBadge.textContent = `${(fraction * 100).toFixed(1)}%`;
-    }
+    const setText = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    };
+    setText('meterPercentBadge', `${(fraction * 100).toFixed(1)}%`);
+    setText('meterTotalUsed', `${formatTokens(used)} / ${formatTokens(limit)}`);
 
-    const meterTotalUsed = document.getElementById('meterTotalUsed');
-    if (meterTotalUsed) {
-      meterTotalUsed.textContent = `${formatTokens(used)} / ${formatTokens(limit)}`;
-    }
+    setText('meterSysTokens', formatTokens(sysTokens));
+    setText('meterPageTokens', formatTokens(pageTokens));
+    setText('meterFileTokens', formatTokens(fileTokens));
+    setText('meterConvTokens', formatTokens(convTokens));
+    setText('meterSysCost', formatUsd(sysTokens * inRate));
+    setText('meterPageCost', formatUsd(pageTokens * inRate));
+    setText('meterFileCost', formatUsd(fileTokens * inRate));
+    setText('meterConvCost', formatUsd(convTokens * inRate));
 
-    if (meterSysTokens) meterSysTokens.textContent = formatTokens(sysTokens);
-    if (meterPageTokens) meterPageTokens.textContent = formatTokens(pageTokens);
-    if (meterFileTokens) meterFileTokens.textContent = formatTokens(fileTokens);
-    if (meterConvTokens) meterConvTokens.textContent = formatTokens(convTokens);
+    const modelObj = (findModelByAnyId(currentBaseModelId)?.model || null);
+    setText('meterModelName', modelObj?.name || currentBaseModelId || 'Model');
+    setText('meterPriceLabel', `${formatRate(pricing.in)} in · ${formatRate(pricing.out)} out / 1M`);
+    setText('meterNextCost', '~' + formatUsd(used * inRate));
+    setText('meterSessionCost', '~' + formatUsd(sessionCost));
+    setText('meterCostNote', currentEngineIsLocal()
+      ? 'Estimate only, not a real bill. Local Terminal runs on your own subscription, so nothing is billed per token; figures are the API-equivalent.'
+      : 'Estimate only, not a real bill. Based on list prices you can review in Settings; real usage, caching and discounts change the total.');
   }
 
   // Popover trigger listeners (Hover & Click)
@@ -7488,6 +8931,28 @@ You are a world-class principal software engineer.
     });
     bar.appendChild(copyBtn);
 
+    // Read aloud (Piper, through the Bridge); click again to stop
+    const speakBtn = document.createElement('button');
+    speakBtn.type = 'button';
+    speakBtn.className = 'streaming-action-btn';
+    speakBtn.setAttribute('title', 'Read aloud');
+    speakBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+      </svg>
+    `;
+    speakBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (speakBtn.classList.contains('speaking')) { stopSpeaking(); return; }
+      stopSpeaking();
+      speakBtn.classList.add('speaking');
+      const started = await speakText(rawText);
+      if (!started) speakBtn.classList.remove('speaking');
+    });
+    bar.appendChild(speakBtn);
+
     // 2. Retry Action
     const retryBtn = document.createElement('button');
     retryBtn.type = 'button';
@@ -7829,6 +9294,72 @@ You are a world-class principal software engineer.
     `;
   }
 
+  // Asks the user before the assistant creates agents; the answer goes back to the background worker
+  function showAgentPermissionCard(req) {
+    welcomeHero.classList.add('hidden');
+    messagesContainer.classList.remove('hidden');
+    const card = document.createElement('div');
+    card.className = 'agent-permission-card';
+    const list = (req.agents || []).slice(0, 12).map((a) => `<li><strong>${escapeHtml(a.name)}</strong>${a.task ? ` <span>${escapeHtml(a.task)}</span>` : ''}</li>`).join('');
+    const more = (req.count || 0) > 12 ? `<li class="more">and ${(req.count || 0) - 12} more...</li>` : '';
+    card.innerHTML = `
+      <div class="agent-permission-title">Create ${req.count} agent${req.count === 1 ? '' : 's'}?</div>
+      <ul class="agent-permission-list">${list}${more}</ul>
+      <div class="agent-permission-warning">Every agent makes its own model calls (in Cowork it also opens its own browser tab). This can use a lot of tokens.</div>
+      <div class="agent-permission-actions">
+        <button type="button" data-act="allow" class="agent-perm-btn allow">Allow</button>
+        <button type="button" data-act="deny" class="agent-perm-btn">Deny</button>
+        <button type="button" data-act="always" class="agent-perm-btn subtle" title="Stop asking from now on (you can turn it back on in Settings)">Allow and don't ask again</button>
+      </div>`;
+    card.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = btn.getAttribute('data-act');
+        const allow = act !== 'deny';
+        sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow });
+        if (act === 'always') {
+          const input = document.getElementById('settingAgentConfirm');
+          if (input) input.checked = false;
+          chrome.storage.local.get(['antigravity_settings'], (res) => {
+            const prev = res.antigravity_settings || {};
+            prev.agentConfirm = false;
+            chrome.storage.local.set({ antigravity_settings: prev });
+          });
+        }
+        card.className = 'agent-permission-card resolved';
+        card.innerHTML = `<div class="agent-permission-title">${allow ? 'Agents approved' : 'Agents denied'}</div>`;
+      });
+    });
+    messagesContainer.appendChild(card);
+    scrollToBottom();
+  }
+
+  function renderAgentRunHtml(data) {
+    const agents = Array.isArray(data.agents) ? data.agents : [];
+    if (agents.length === 0) {
+      return '<div class="agent-run-card"><div class="agent-run-head">Starting sub-agents...</div></div>';
+    }
+    const finished = agents.filter((a) => a.status === 'done' || a.status === 'error').length;
+    const rows = agents.map((a) => {
+      const indent = Math.max(0, (a.depth || 1) - 1) * 14;
+      const body = a.status === 'error'
+        ? `<div class="agent-run-output error">${escapeHtml(a.error || 'Failed')}</div>`
+        : (a.text ? `<div class="agent-run-output">${escapeHtml(a.text)}</div>` : '');
+      const time = typeof a.elapsed === 'number' ? `${a.elapsed}s` : '';
+      return `<details class="agent-run-item">
+        <summary style="padding-left:${12 + indent}px">
+          <span class="agent-run-dot ${escapeHtml(a.status || 'running')}"></span>
+          <span class="agent-run-name">${escapeHtml(a.name || 'Agent')}</span>
+          <span class="agent-run-role">${escapeHtml(a.role || '')}</span>
+          <span class="agent-run-time">${time}</span>
+        </summary>${body}
+      </details>`;
+    }).join('');
+    return `<div class="agent-run-card">
+      <div class="agent-run-head">Sub-agents<span class="agent-run-count">${finished}/${agents.length} done</span></div>
+      ${rows}
+    </div>`;
+  }
+
   function renderMarkdown(text, isStreaming = false) {
     if (typeof text !== 'string') {
       text = text ? String(text) : '';
@@ -7871,6 +9402,24 @@ You are a world-class principal software engineer.
       reasoningHtml = formatReasoningAccordion(thoughtBlocks.join('\n\n'), isThinkingInProgress);
     }
 
+    // 1.4 Sub-agent cards (<agent_run>JSON</agent_run>) and the delegation request itself (<spawn_agents>)
+    const agentRunMap = new Map();
+    let agentRunIdx = 0;
+    responseText = responseText.replace(/<agent_run>([\s\S]*?)<\/agent_run>/gi, (_, json) => {
+      const id = `%%%AGENTRUN_${agentRunIdx++}%%%`;
+      let data = null;
+      try { data = JSON.parse(json); } catch (_) { /* incomplete card: skip */ }
+      agentRunMap.set(id, data ? renderAgentRunHtml(data) : '');
+      return `\n\n${id}\n\n`;
+    });
+    responseText = responseText
+      .replace(/<spawn_agents>[\s\S]*?<\/spawn_agents>/gi, '')
+      .replace(/<spawn_agents>[\s\S]*$/i, '')
+      .replace(/<mascot_note>[\s\S]*?<\/mascot_note>/gi, '')
+      .replace(/<mascot_note>[\s\S]*$/i, '')
+      .replace(/<agent_run>[\s\S]*$/i, '')
+      .trim();
+
     // 1.5 Extract Approval Card (<approval_card>...</approval_card>)
     const approvalMatch = responseText.match(/<approval_card>([\s\S]*?)(?:<\/approval_card>|$)/i);
     let approvalHtml = '';
@@ -7904,7 +9453,7 @@ You are a world-class principal software engineer.
       try {
         const parsed = JSON.parse(rawSuggestions);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          latestModelSuggestions = parsed.filter(s => typeof s === 'string' && s.trim().length > 0).slice(0, 5);
+          latestModelSuggestions = parsed.filter(s => typeof s === 'string' && s.trim().length > 0).slice(0, 3);
         }
       } catch (_) {
         // Handle newline separated or non-strict json
@@ -7912,7 +9461,7 @@ You are a world-class principal software engineer.
           .map(l => l.replace(/^[\s*"-]+/, '').replace(/["',]+$/, '').trim())
           .filter(l => l.length > 3 && !l.startsWith('[') && !l.startsWith(']'));
         if (lines.length > 0) {
-          latestModelSuggestions = lines.slice(0, 5);
+          latestModelSuggestions = lines.slice(0, 3);
         }
       }
       responseText = responseText.replace(nextStepsMatch[0], '').trim();
@@ -8010,6 +9559,11 @@ You are a world-class principal software engineer.
       } else {
         html = html.replaceAll(id, () => val);
       }
+    }
+
+    for (const [id, val] of agentRunMap.entries()) {
+      const pWrapped = `<p>${id}</p>`;
+      html = html.includes(pWrapped) ? html.replaceAll(pWrapped, () => val) : html.replaceAll(id, () => val);
     }
 
     // Ensure links open safely in a new tab

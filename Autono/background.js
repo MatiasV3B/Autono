@@ -42,6 +42,11 @@ async function getSettings() {
     'autono_local_mcp_url',
   ]);
   const s = data.antigravity_settings || {};
+  // Old versions of the Bridge listened on port 8000; it has used 8765 for a long time. Move the saved address.
+  if (/^https?:\/\/(127\.0\.0\.1|localhost):8000\/?$/i.test(s.bridgeUrl || '')) {
+    s.bridgeUrl = s.bridgeUrl.replace(':8000', ':8765').replace(/\/$/, '');
+    chrome.storage.local.set({ antigravity_settings: s }).catch(() => null);
+  }
   return {
     bridgeUrl: s.bridgeUrl || DEFAULT_BRIDGE_URL,
     selectedModel: s.selectedModel || DEFAULT_MODEL,
@@ -66,6 +71,9 @@ async function getSettings() {
     workingOverlay: s.workingOverlay !== undefined ? s.workingOverlay : true,
     tabLockedSidebar: s.tabLockedSidebar !== undefined ? s.tabLockedSidebar : false,
     waitMessageSentOutInstantly: s.waitMessageSentOutInstantly !== undefined ? s.waitMessageSentOutInstantly : true,
+    multiAgent: !!s.multiAgent,
+    agentConfirm: s.agentConfirm !== false,
+    mascot: s.mascot !== false,
   };
 }
 
@@ -1193,6 +1201,9 @@ async function fetchBridgeQuota(baseUrl, force = false) {
 }
 
 // ─── AntigravityBridge Connection Watchdog ──────────────────────────────────
+// The Bridge reports an "api_level"; the extension needs at least this one (Claude fixes, sub-agents)
+const MIN_BRIDGE_API_LEVEL = 4;
+
 async function checkBridgeHealth() {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
@@ -1200,9 +1211,12 @@ async function checkBridgeHealth() {
     const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       bridgeOnline = true;
+      const info = await res.json().catch(() => ({}));
+      // a Bridge that has been running since before an update keeps the old code until it is restarted
+      const outdated = Number(info.api_level || 0) < MIN_BRIDGE_API_LEVEL;
       await refreshModelsList(base);
       await fetchBridgeQuota(base);
-      broadcastMessage({ type: 'bridge_status', online: true, models: availableModels, quota: cachedCliQuota });
+      broadcastMessage({ type: 'bridge_status', online: true, outdated, models: availableModels, quota: cachedCliQuota });
       return true;
     }
   } catch (err) {
@@ -1283,7 +1297,203 @@ function removeInternalListener(fn) {
   internalMessageListeners.delete(fn);
 }
 
+// ─── Mascot (optional add-on) ───────────────────────────────────────────────────
+// A little critter that walks onto the tab the user is looking at: when a task starts, when it needs
+// the user (permission) and when it finishes. In between it stays away unless the user calls it
+// (shortcut Alt+Shift+1) or is talking to it. It works with every model, API or local terminal.
+// content/mascot.js draws it; the animation follows what the task is doing:
+//   start (lit fuse) -> thinking (light bulb) -> working (headphones) / searching (looking around)
+//   -> agents (welding) -> retry (cleaning up) -> waiting (needs your OK) -> done (speech bubble)
+const mascot = {
+  eligible: false, // the add-on is on
+  dismissed: false, // the user closed it: stays away until the next task
+  state: null, // what the task is doing now (tracked even while the mascot is hidden)
+  visible: false, // should it be on screen
+  summoned: false, // called with the shortcut
+  panelOpen: false, // the user is typing a /btw
+  model: null,
+  provider: null,
+  session: null, // where the last task ran, so a message to the mascot continues that chat
+  debugTask: false, // the task is about debugging / consoles / logs
+  note: '', // the model's own short message for the speech bubble
+  tabs: new Set(),
+  startTimer: null,
+  waitTimer: null,
+};
+const MASCOT_STICKY = new Set(['waiting', 'waiting_long', 'done', 'error']);
+
+// The model is asked to end its answer with <mascot_note>…</mascot_note>; it goes in the speech bubble, not in the chat
+function extractMascotNote(text) {
+  const s = String(text || '');
+  const m = /<mascot_note>([\s\S]*?)<\/mascot_note>/i.exec(s);
+  const clean = s
+    .replace(/<mascot_note>[\s\S]*?<\/mascot_note>/gi, '')
+    .replace(/<mascot_note>[\s\S]*$/i, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { text: clean, note: m ? m[1].trim().replace(/\s+/g, ' ').slice(0, 200) : '' };
+}
+
+function mascotText() {
+  return (mascot.state === 'done' || mascot.state === 'error') ? mascot.note : '';
+}
+
+function mascotBegin(settings, modelName, explicitProvider, taskText) {
+  const wasVisible = mascot.visible;
+  clearTimeout(mascot.startTimer);
+  clearTimeout(mascot.waitTimer);
+  mascot.eligible = settings.mascot !== false;
+  mascot.dismissed = false;
+  mascot.state = null;
+  mascot.visible = false;
+  mascot.summoned = false;
+  mascot.panelOpen = false;
+  mascot.model = modelName || null;
+  mascot.provider = explicitProvider || null;
+  mascot.note = '';
+  mascot.debugTask = /debug|depur|console|consola|stack\s?trace|traceback|terminal|\blogs?\b|devtools|exception|excepci|\bbug|error(es)?\b/i.test(String(taskText || ''));
+  if (wasVisible) mascotPush(false).catch(() => null);
+}
+
+// Deliver a message to a tab; pages opened before the extension was (re)loaded get the script injected first
+async function mascotSend(tabId, msg) {
+  try {
+    await chrome.tabs.sendMessage(tabId, msg);
+    return;
+  } catch (_) { /* no content script there yet */ }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content/mascot.js'] });
+    await chrome.tabs.sendMessage(tabId, msg);
+  } catch (_) { /* restricted page (chrome://, store...) */ }
+}
+
+async function mascotPush(enter) {
+  const show = mascot.eligible && !mascot.dismissed && mascot.visible && !!mascot.state;
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  for (const id of [...mascot.tabs]) {
+    if (!show || !active || id !== active.id) {
+      chrome.tabs.sendMessage(id, { type: 'mascot_hide' }).catch(() => null);
+      mascot.tabs.delete(id);
+    }
+  }
+  if (show && active?.id) {
+    mascot.tabs.add(active.id);
+    await mascotSend(active.id, { type: 'mascot_update', state: mascot.state, enter: !!enter, text: mascotText() });
+  }
+}
+
+function mascotSet(state) {
+  if (!mascot.eligible || mascot.dismissed || mascot.state === state) return;
+  const prev = mascot.state;
+  const wasVisible = mascot.visible;
+  mascot.state = state;
+  clearTimeout(mascot.startTimer);
+  clearTimeout(mascot.waitTimer);
+  const held = mascot.summoned || mascot.panelOpen;
+
+  if (state === 'start') {
+    mascot.visible = true;
+    // walks in, says hi, and leaves again unless the user keeps it
+    mascot.startTimer = setTimeout(() => {
+      if (!mascot.summoned && !mascot.panelOpen && !MASCOT_STICKY.has(mascot.state)) {
+        mascot.visible = false;
+        mascotPush(false).catch(() => null);
+      }
+    }, 6000);
+  } else if (MASCOT_STICKY.has(state)) {
+    mascot.visible = true; // needs you / finished: stays until dismissed
+    if (state === 'waiting') {
+      // after two minutes without an answer it switches to the "still waiting" animation
+      mascot.waitTimer = setTimeout(() => { if (mascot.state === 'waiting') mascotSet('waiting_long'); }, 120000);
+    }
+  } else if ((prev === 'waiting' || prev === 'waiting_long') && !held) {
+    mascot.visible = false; // the permission was answered
+  }
+  mascotPush(!wasVisible && mascot.visible).catch(() => null);
+}
+
+function mascotHide() {
+  mascot.visible = false;
+  mascot.summoned = false;
+  mascot.panelOpen = false;
+  mascot.state = null;
+  clearTimeout(mascot.startTimer);
+  clearTimeout(mascot.waitTimer);
+  for (const id of mascot.tabs) chrome.tabs.sendMessage(id, { type: 'mascot_hide' }).catch(() => null);
+  mascot.tabs.clear();
+}
+
+// The user calls it (shortcut) to ask a quick /btw while a task runs elsewhere
+async function mascotSummon() {
+  const settings = await getSettings();
+  if (settings.mascot === false) return false;
+  mascot.eligible = true;
+  mascot.dismissed = false;
+  mascot.summoned = true;
+  if (!mascot.state) mascot.state = 'idle';
+  const wasVisible = mascot.visible;
+  mascot.visible = true;
+  await mascotPush(!wasVisible);
+  return true;
+}
+
+// Every update the worker broadcasts to the side panel also tells us what the task is doing
+function mascotFromBroadcast(p) {
+  switch (p.type) {
+    case 'task_start':
+      mascotSet('start');
+      break;
+    case 'stream_chunk': {
+      const text = String(p.fullAnswer || '');
+      const lastRun = text.lastIndexOf('<agent_run>');
+      const runningAgents = lastRun >= 0 && text.slice(lastRun).includes('"status":"running"');
+      if (runningAgents) mascotSet('agents');
+      else if (text.lastIndexOf('<thought>') > text.lastIndexOf('</thought>')) mascotSet('thinking');
+      else if (text.trim()) {
+        // inside an open code block it is writing code (or hunting a bug)
+        const insideCode = (text.match(/```/g) || []).length % 2 === 1;
+        mascotSet(insideCode ? (mascot.debugTask ? 'debugging' : 'coding') : 'working');
+      }
+      break;
+    }
+    case 'cowork_plan_created':
+      mascotSet('thinking');
+      break;
+    case 'cowork_step_start':
+      if (/^Agents/i.test(p.status || '')) mascotSet('agents');
+      else if (/Synthesizing/i.test(p.status || '')) mascotSet('working');
+      else if (/Analyzing/i.test(p.status || '')) mascotSet('reading');
+      else mascotSet('thinking');
+      break;
+    case 'cowork_step_action': {
+      const action = p.plan?.action;
+      mascotSet(action === 'navigate' ? 'searching' : (action === 'spawn_agents' ? 'agents' : (mascot.debugTask ? 'debugging' : 'working')));
+      break;
+    }
+    case 'agent_permission_request':
+      mascotSet('waiting');
+      break;
+    case 'task_complete':
+      mascot.note = String(p.mascotNote || '').slice(0, 200);
+      mascotSet('done');
+      break;
+    case 'task_error':
+      mascot.note = String(p.error || '').slice(0, 140);
+      mascotSet('error');
+      break;
+    case 'task_aborted':
+      mascotHide();
+      break;
+    default:
+      break;
+  }
+}
+
+chrome.tabs.onActivated.addListener(() => { if (mascot.visible) mascotPush(false).catch(() => null); });
+chrome.windows?.onFocusChanged?.addListener(() => { if (mascot.visible) mascotPush(false).catch(() => null); });
+
 function broadcastMessage(payload) {
+  try { mascotFromBroadcast(payload); } catch (_) { /* the mascot must never break a task */ }
   for (const fn of internalMessageListeners) {
     try {
       fn(payload);
@@ -1570,10 +1780,543 @@ function extractAnswerFromRawBody(raw) {
   return '';
 }
 
+// ─── Multi-agent: a lead assistant delegates work to parallel sub-agents ─────────
+// Protocol (mirrored by the Bridge in core/subagents.py): the lead ends a message with
+// <spawn_agents>[{"name","role","task"}]</spawn_agents>. Each agent works on its own and its result
+// is handed back to the lead, which then writes the final answer.
+const SUBAGENT_LIMITS = { maxAgents: 50, maxConcurrency: 4, maxTabs: 5, maxDepth: 2, rounds: 3, timeoutMs: 600000 };
+
+const MULTI_AGENT_DIRECTIVE = `MULTI-AGENT DELEGATION (enabled):
+- You may split a large request into independent parts and hand each one to a sub-agent. Sub-agents run in parallel, each in its own terminal.
+- To delegate, end your message with exactly one block:
+<spawn_agents>
+[{"name": "Short name", "role": "Who this agent is and how it should work", "task": "Complete, self-contained instructions for this agent"}]
+</spawn_agents>
+- Sub-agents cannot see this conversation or the page, so every task must contain everything the agent needs.
+- Use as many agents as the task truly needs (at most 50), and only when the parts are independent. The user is asked to approve them and each one uses tokens, so for simple requests answer directly without delegating.
+- Their results come back to you in the next message; then write the final answer for the user.`;
+
+function normalizeAgentSpecs(raw, max = SUBAGENT_LIMITS.maxAgents) {
+  if (raw && !Array.isArray(raw) && typeof raw === 'object') raw = raw.agents || [raw];
+  if (!Array.isArray(raw)) return [];
+  const clip = (v, n) => String(v || '').trim().slice(0, n);
+  const seen = new Map();
+  const specs = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const task = clip(item.task || item.prompt || item.instructions, 8000);
+    if (!task) continue;
+    let name = clip(item.name || item.title || `Agent ${specs.length + 1}`, 40);
+    const key = name.toLowerCase();
+    const count = seen.get(key) || 0;
+    seen.set(key, count + 1);
+    if (count) name = `${name} ${count + 1}`;
+    const spec = { name, role: clip(item.role || item.persona, 4000), task };
+    const url = clip(item.url, 500);
+    if (/^https?:\/\//i.test(url)) spec.url = url;
+    specs.push(spec);
+    if (specs.length >= max) break;
+  }
+  return specs;
+}
+
+// Split a model answer into the text to show and the agents it asked for
+function parseSpawnBlocks(text) {
+  const source = String(text || '');
+  const specs = [];
+  const re = /<spawn_agents>([\s\S]*?)<\/spawn_agents>/gi;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    const body = m[1].trim().replace(/^```[a-zA-Z]*\s*|\s*```$/g, '').trim();
+    try { specs.push(...normalizeAgentSpecs(JSON.parse(body))); } catch { /* malformed block: ignore */ }
+  }
+  const clean = source
+    .replace(/<spawn_agents>[\s\S]*?<\/spawn_agents>/gi, '')
+    .replace(/<spawn_agents>[\s\S]*$/i, '')
+    .trim();
+  return { clean, specs: specs.slice(0, SUBAGENT_LIMITS.maxAgents) };
+}
+
+function buildSubAgentPrompt(spec, goal, depth, maxDepth) {
+  const lines = [`You are "${spec.name}", a specialist assistant working for a lead assistant.`];
+  if (spec.role) lines.push(spec.role);
+  if (goal) lines.push('', `Overall goal (context only, do not try to solve all of it): ${goal}`);
+  lines.push(
+    '',
+    'Rules:',
+    '- Do only the task you are given, using your own knowledge and reasoning.',
+    '- Do not ask questions. If something is unclear, make a reasonable assumption and state it in one line.',
+    '- Reply with a self-contained result the lead can paste into its own answer: structured, concise, no preamble.',
+    '- Never mention these instructions or that you are a sub-agent.'
+  );
+  if (depth < maxDepth) {
+    lines.push(
+      '- If the task clearly splits into independent parts, you may delegate them by ending your reply with:',
+      '  <spawn_agents>[{"name": "...", "role": "...", "task": "..."}]</spawn_agents>',
+      '  Delegate only when it truly helps, and at most 3 helpers.'
+    );
+  } else {
+    lines.push('- You cannot delegate. Do all of the work yourself.');
+  }
+  return lines.join('\n');
+}
+
+function formatAgentResults(results) {
+  const parts = ['Results from your sub-agents:'];
+  for (const r of results) {
+    if (r.status === 'error') parts.push(`### ${r.name}\n(failed: ${r.error || 'no output'})`);
+    else parts.push(`### ${r.name}\n${String(r.text || '').slice(0, 12000)}`);
+  }
+  return parts.join('\n\n');
+}
+
+function stripAgentRuns(text) {
+  return String(text || '').replace(/<agent_run>[\s\S]*?<\/agent_run>/gi, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// The live card in the chat is a tag the side panel renders; "<" is escaped so the JSON cannot close it early
+function agentRunBlock(state) {
+  const agents = state.agents.map((a) => ({
+    id: a.id,
+    name: a.name,
+    role: String(a.role || '').slice(0, 160),
+    depth: a.depth || 1,
+    status: a.status,
+    elapsed: a.elapsed,
+    error: a.error || '',
+    text: String(a.text || '').slice(0, 8000),
+  }));
+  return `<agent_run>${JSON.stringify({ agents }).replace(/</g, '\\u003c')}</agent_run>`;
+}
+
+function applyAgentEvent(state, ev) {
+  if (ev.type !== 'agent_start' && ev.type !== 'agent_done') return;
+  let entry = state.agents.find((a) => a.id === ev.id);
+  if (!entry) {
+    entry = { id: ev.id, name: ev.name, role: ev.role || '', depth: ev.depth || 1, parent: ev.parent || null, status: 'running' };
+    state.agents.push(entry);
+  }
+  if (ev.type === 'agent_done') {
+    entry.status = ev.status === 'error' ? 'error' : 'done';
+    entry.text = ev.text || '';
+    entry.error = ev.error || '';
+    entry.elapsed = ev.elapsed;
+  }
+}
+
+function createLimiter(limit) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= limit || queue.length === 0) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    fn().then(resolve, reject).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
+}
+
+// Runs the agents from the extension itself: used for direct APIs and when the Bridge has no /agents/run yet
+async function runSubAgentsInExtension(specs, ctx) {
+  const { endpointInfo, basePayload, goal, signal, onEvent } = ctx;
+  const limit = createLimiter(SUBAGENT_LIMITS.maxConcurrency);
+  const usage = { prompt_tokens: 0, completion_tokens: 0 };
+  const all = [];
+
+  const callOnce = (messages) => limit(async () => {
+    const ctl = new AbortController();
+    const onAbort = () => ctl.abort();
+    if (signal) {
+      if (signal.aborted) ctl.abort();
+      signal.addEventListener('abort', onAbort);
+    }
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, SUBAGENT_LIMITS.timeoutMs);
+    try {
+      const res = await fetchInferenceWithFallback(endpointInfo, { ...basePayload, messages, stream: false }, ctl.signal);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Error ${res.status}: ${errText || res.statusText}`);
+      }
+      const json = await res.json();
+      const out = json.choices?.[0]?.message?.content || '';
+      usage.prompt_tokens += json.usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 4);
+      usage.completion_tokens += json.usage?.completion_tokens ?? Math.ceil(out.length / 4);
+      return out;
+    } catch (err) {
+      if (timedOut) throw new Error(`Timed out after ${SUBAGENT_LIMITS.timeoutMs / 1000}s.`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    }
+  });
+
+  const callModel = async (messages) => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const text = await callOnce(messages);
+      if (attempt === 1 && text.length < 800 && /blocked by content safety filters/i.test(text)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      return text;
+    }
+    return '';
+  };
+
+  const runLevel = (levelSpecs, depth, parent) => Promise.all(levelSpecs.map((spec, i) => {
+    const id = parent ? `${parent}.${i + 1}` : String(i + 1);
+    return runOne(spec, id, depth, parent);
+  }));
+
+  const runOne = async (spec, id, depth, parent) => {
+    const started = Date.now();
+    onEvent({ type: 'agent_start', id, name: spec.name, role: spec.role, depth, parent });
+    const result = { id, name: spec.name, depth, parent, status: 'done', text: '', error: '' };
+    try {
+      const messages = [
+        { role: 'system', content: buildSubAgentPrompt(spec, goal, depth, SUBAGENT_LIMITS.maxDepth) },
+        { role: 'user', content: spec.task },
+      ];
+      const first = await callModel(messages);
+      let { clean, specs: helpers } = parseSpawnBlocks(first);
+      if (helpers.length && depth < SUBAGENT_LIMITS.maxDepth) {
+        const helperResults = await runLevel(helpers, depth + 1, id);
+        messages.push(
+          { role: 'assistant', content: first },
+          { role: 'user', content: `${formatAgentResults(helperResults)}\n\nNow finish your own task using these results. Do not delegate again.` }
+        );
+        clean = parseSpawnBlocks(await callModel(messages)).clean;
+      }
+      result.text = clean;
+      if (!clean.trim()) {
+        result.status = 'error';
+        result.error = 'The agent returned nothing.';
+      }
+    } catch (err) {
+      if (err.name === 'AbortError' && signal?.aborted) throw err;
+      result.status = 'error';
+      result.error = err.message || 'Unknown error';
+    }
+    result.elapsed = Math.round((Date.now() - started) / 100) / 10;
+    all.push(result);
+    onEvent({ type: 'agent_done', ...result });
+    return result;
+  };
+
+  await runLevel(specs, 1, null);
+  return { results: all, usage };
+}
+
+// Preferred route on the local Bridge: it starts one CLI process per agent. Returns null when the Bridge lacks the endpoint.
+async function runSubAgentsViaBridge(specs, ctx) {
+  const { endpointInfo, goal, signal, onEvent, basePayload } = ctx;
+  const url = `${endpointInfo.cleanBase}/${endpointInfo.provider}/v1/agents/run`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: endpointInfo.headers,
+      body: JSON.stringify({
+        model: endpointInfo.model,
+        goal,
+        agents: specs,
+        stream: true,
+        max_concurrency: SUBAGENT_LIMITS.maxConcurrency,
+        max_depth: SUBAGENT_LIMITS.maxDepth,
+        max_agents: SUBAGENT_LIMITS.maxAgents,
+        timeout: SUBAGENT_LIMITS.timeoutMs / 1000,
+        temperature: basePayload.temperature,
+        reasoning_effort: basePayload.reasoning_effort,
+        thinking_budget: basePayload.thinking_budget,
+      }),
+      signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    return null; // Bridge unreachable: the caller falls back to the extension runner
+  }
+  if (res.status === 404 || res.status === 405) return null;
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Sub-agents: Error ${res.status}: ${errText || res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let done = null;
+  while (true) {
+    const { done: finished, value } = await reader.read();
+    if (finished) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const data = t.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      let ev;
+      try { ev = JSON.parse(data); } catch { continue; }
+      if (ev.type === 'run_error') throw new Error(ev.error || 'Sub-agent run failed');
+      if (ev.type === 'run_done') done = ev;
+      else onEvent(ev);
+    }
+  }
+  if (!done) throw new Error('The Bridge closed the sub-agent run before it finished.');
+  return { results: done.results || [], usage: done.usage || { prompt_tokens: 0, completion_tokens: 0 } };
+}
+
+async function runSubAgents(specs, ctx) {
+  if (!ctx.endpointInfo.isDirectCloud && ctx.endpointInfo.cleanBase) {
+    const viaBridge = await runSubAgentsViaBridge(specs, ctx);
+    if (viaBridge) return viaBridge;
+  }
+  return runSubAgentsInExtension(specs, ctx);
+}
+
+// Streams one model turn and returns its text (reasoning is wrapped in <thought> like the main chat stream)
+async function streamChatText(endpointInfo, payload, signal, onText) {
+  const res = await fetchInferenceWithFallback(endpointInfo, { ...payload, stream: true }, signal);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Error ${res.status}: ${errText || res.statusText}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let text = '';
+  let buffer = '';
+  let raw = '';
+  let inThought = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const piece = decoder.decode(value, { stream: true });
+    if (raw.length < 400000) raw += piece;
+    buffer += piece;
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const data = t.slice(5).trim();
+      if (data === '[DONE]') continue;
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta;
+        const content = delta?.content || '';
+        const reasoning = delta?.reasoning_content || delta?.reasoning || delta?.thought || '';
+        let chunk = '';
+        if (reasoning) {
+          chunk += inThought ? reasoning : `<thought>${reasoning}`;
+          inThought = true;
+        }
+        if (content) {
+          if (inThought) { chunk += '</thought>\n\n'; inThought = false; }
+          chunk += content;
+        }
+        if (chunk) { text += chunk; onText(text); }
+      } catch { /* partial chunk */ }
+    }
+  }
+  if (inThought) { text += '</thought>\n\n'; }
+  if (!text.trim()) {
+    let recovered = extractAnswerFromRawBody(raw + buffer);
+    if (!recovered) {
+      const retry = await fetchInferenceWithFallback(endpointInfo, { ...payload, stream: false }, signal);
+      if (!retry.ok) {
+        const errText = await retry.text().catch(() => '');
+        throw new Error(`Error ${retry.status}: ${errText || retry.statusText}`);
+      }
+      recovered = (await retry.json()).choices?.[0]?.message?.content || '';
+    }
+    text = String(recovered || '');
+    if (text) onText(text);
+  }
+  return text;
+}
+
+// ─── Agent permission: the user approves every batch of new agents (unless they turned the question off) ──
+const pendingAgentPermissions = new Map();
+
+function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
+  if (settings.agentConfirm === false) return Promise.resolve(true);
+  const requestId = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = (allowed) => {
+      clearTimeout(timer);
+      pendingAgentPermissions.delete(requestId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve(Boolean(allowed));
+    };
+    const onAbort = () => finish(false);
+    timer = setTimeout(() => finish(false), 5 * 60 * 1000); // no answer: treat as "no"
+    pendingAgentPermissions.set(requestId, finish);
+    if (signal) {
+      if (signal.aborted) return finish(false);
+      signal.addEventListener('abort', onAbort);
+    }
+    broadcastMessage({
+      type: 'agent_permission_request',
+      requestId,
+      taskId,
+      sessionId,
+      count: specs.length,
+      agents: specs.map((s) => ({
+        name: s.name,
+        role: String(s.role || '').slice(0, 160),
+        task: String(s.task || '').slice(0, 220),
+        url: s.url || '',
+      })),
+    });
+  });
+}
+
+function coworkSubagentLine(enabled, budget) {
+  if (!enabled) {
+    return 'Creating, invoking, or delegating tasks to subagents is STRICTLY PROHIBITED; all actions must be executed directly by you.';
+  }
+  return `MULTI-AGENT (enabled): when the goal splits into independent browser tasks you may use the action "spawn_agents" together with an "agents" array: [{"name": "...", "role": "...", "task": "...", "url": "start page"}]. Each agent gets its own browser tab, works in parallel with the others, and reports a text result that appears in the action history. Agents cannot see your page or your goal, so every task must be self-contained and should include a start "url" when you know it. You may still create up to ${Math.max(0, budget)} agents in this run (hard limit 50). Use it only when parallel tabs clearly help; the user is asked to approve it and every agent consumes tokens.`;
+}
+
+function buildTabAgentPrompt(spec, goal, screen, history, step, maxSteps) {
+  return `You are "${spec.name}", a browser agent working in your own tab for a lead assistant.
+${spec.role ? spec.role + '\n' : ''}Overall goal (context only): "${goal}"
+YOUR TASK: "${spec.task}"
+
+CURRENT STEP: ${step} of ${maxSteps}
+
+SCREEN STATE:
+URL: ${screen.url}
+Title: ${screen.title}
+Detected buttons: ${screen.interactiveSummary?.buttons?.slice(0, 50).join(', ') || 'None'}
+Input fields: ${JSON.stringify(screen.interactiveSummary?.inputs?.slice(0, 50) || [])}
+Summarized visible content: ${screen.pageContent?.slice(0, 20000) || 'N/A'}
+
+Previous actions:
+${history.map((h) => `- Step ${h.step}: [${h.action}] ${h.description} -> ${h.result}`).join('\n') || 'None.'}
+
+Do only your task. Never ask questions; if something is unclear, assume and continue. When you are done, use "finish" and put everything the lead needs in "result".
+Reply ONLY with a JSON block:
+{
+  "thought": "Brief explanation of what you see and why",
+  "action": "click" | "type" | "scroll" | "navigate" | "wait" | "finish",
+  "selector": "Visible text of button/link, or CSS selector",
+  "value": "Text to type, URL to navigate to, or scroll direction",
+  "description": "What you are doing",
+  "result": "Only for finish: the complete result of your task"
+}`;
+}
+
+// Each agent drives its own browser tab; the tab is closed when the agent reports back
+async function runTabAgents(specs, ctx) {
+  const { settings, base, modelName, explicitProvider, signal, onEvent, goal, idOffset = 0 } = ctx;
+  const endpoint = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
+  const limit = createLimiter(SUBAGENT_LIMITS.maxTabs);
+  const maxSteps = Math.max(4, Math.min(settings.maxSteps || 15, 15));
+  const usage = { prompt_tokens: 0, completion_tokens: 0 };
+  const results = [];
+
+  const runOne = (spec, i) => limit(async () => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const id = String(idOffset + i + 1);
+    const started = Date.now();
+    onEvent({ type: 'agent_start', id, name: spec.name, role: spec.role, depth: 1, parent: null });
+    const result = { id, name: spec.name, depth: 1, parent: null, status: 'done', text: '', error: '' };
+    let tabId = null;
+    try {
+      const tab = await chrome.tabs.create({ url: spec.url || 'https://www.google.com', active: false });
+      tabId = tab.id;
+      await waitForTabLoadComplete(tabId);
+      await triggerWorkOverlay(tabId, true, `Agent: ${spec.name}`).catch(() => null);
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
+
+      const history = [];
+      let final = '';
+      for (let step = 1; step <= maxSteps && !signal?.aborted; step++) {
+        const { screenData } = await getPageContext(tabId, false);
+        const prompt = buildTabAgentPrompt(spec, goal, screenData, history, step, maxSteps);
+        const res = await fetchInferenceWithFallback(endpoint, {
+          model: endpoint.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          stream: false,
+          max_tokens: settings.maxOutputTokens || 65536,
+          max_output_tokens: settings.maxOutputTokens || 65536,
+          ...getProviderModes(endpoint.model, settings, endpoint),
+        }, signal);
+        if (!res.ok) throw new Error(`Error ${res.status}: ${(await res.text().catch(() => '')) || res.statusText}`);
+        const raw = (await res.json()).choices?.[0]?.message?.content || '{}';
+        usage.prompt_tokens += Math.ceil(prompt.length / 4);
+        usage.completion_tokens += Math.ceil(raw.length / 4);
+
+        let plan;
+        try {
+          const m = raw.match(/\{[\s\S]*\}/);
+          plan = m ? JSON.parse(m[0]) : { action: 'finish', result: raw };
+        } catch {
+          plan = { action: 'finish', result: raw };
+        }
+        if (plan.action === 'finish') {
+          final = plan.result || plan.thought || plan.description || '';
+          break;
+        }
+
+        let outcome = 'Success';
+        if (plan.action === 'click') outcome = await executeClickAction(tabId, plan.selector);
+        else if (plan.action === 'type') outcome = await executeTypeAction(tabId, plan.selector, plan.value);
+        else if (plan.action === 'scroll') outcome = await executeScrollAction(tabId, plan.value || 'down');
+        else if (plan.action === 'navigate' && plan.value) {
+          await chrome.tabs.update(tabId, { url: plan.value });
+          await waitForTabLoadComplete(tabId);
+          await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
+          outcome = `Navigated to ${plan.value}`;
+        } else {
+          await new Promise((r) => setTimeout(r, 1500));
+          outcome = 'Wait completed';
+        }
+        history.push({ step, action: plan.action, description: plan.description || '', result: String(outcome).slice(0, 300) });
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (!final && history.length) {
+        final = `Step limit reached before the agent finished. Last actions:\n${history.slice(-5).map((h) => `- ${h.description || h.action}: ${h.result}`).join('\n')}`;
+      }
+      result.text = final;
+      if (!String(final).trim()) {
+        result.status = 'error';
+        result.error = 'The agent returned nothing.';
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      result.status = 'error';
+      result.error = err.message || 'Unknown error';
+    } finally {
+      if (tabId) {
+        await triggerWorkOverlay(tabId, false).catch(() => null);
+        chrome.tabs.remove(tabId).catch(() => null);
+      }
+    }
+    result.elapsed = Math.round((Date.now() - started) / 100) / 10;
+    results.push(result);
+    onEvent({ type: 'agent_done', ...result });
+  });
+
+  await Promise.all(specs.map(runOne));
+  return { results, usage };
+}
+
+const MASCOT_NOTE_LINE = '\n\nMASCOT NOTE (small speech bubble):\nAt the very end of your final answer, after everything else, add one line <mascot_note>one or two short friendly sentences saying what you just did, in the user\'s language, 140 characters at most</mascot_note>. The user sees it in a speech bubble when they are on another tab.';
+
 async function handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider = null, retryOnBlock = true) {
   const settings = await getSettings();
   const base = settings.bridgeUrl.replace(/\/+$/, '');
   const abortController = new AbortController();
+
+  const multiAgentOn = Boolean(settings.multiAgent) || /^\s*\/teamwork\b/i.test(userText || '');
+  mascotBegin(settings, modelName || settings.selectedModel || DEFAULT_MODEL, explicitProvider, userText);
+  mascot.session = { sessionId, model: modelName, tabId, effort: thinkingEffort, provider: explicitProvider };
 
   runningTask = {
     taskId,
@@ -1587,17 +2330,20 @@ async function handleChatStream(taskId, sessionId, userText, modelName, includeS
   broadcastMessage({ type: 'task_start', taskId, sessionId, mode: 'chat' });
 
   try {
+    mascotSet('reading');
     // 1. Get Screen Context JSON
     const { screenData, screenshotDataUrl } = await getPageContext(tabId, includeScreenshot);
 
     // 2. Build Messages with explicit CoT prompt and strict Markdown / LaTeX
+    const mascotNoteLine = settings.mascot !== false ? MASCOT_NOTE_LINE : '';
+    const subagentDirective = multiAgentOn ? MULTI_AGENT_DIRECTIVE : `CRITICAL CONTROL DIRECTIVE (STRICT SUBAGENT PROHIBITION):
+- Creating, invoking, or delegating to subagents is STRICTLY PROHIBITED (invoke_subagent, define_subagent, or parallel subagents are completely disabled).
+- Under NO circumstances may you create subagents to edit files or browse the web.
+- ALL actions, reasoning, analysis, and code MUST be executed directly by you in this single central execution thread.`;
     const systemPrompt = `You are Autono, an advanced autonomous AI browser agent and navigation copilot connected to local Antigravity Bridge and running in Google Chrome.
 Your goal is to solve whatever the user requests with maximum precision, depth, completeness, and clarity.
 
-CRITICAL CONTROL DIRECTIVE (STRICT SUBAGENT PROHIBITION):
-- Creating, invoking, or delegating to subagents is STRICTLY PROHIBITED (invoke_subagent, define_subagent, or parallel subagents are completely disabled).
-- Under NO circumstances may you create subagents to edit files or browse the web.
-- ALL actions, reasoning, analysis, and code MUST be executed directly by you in this single central execution thread.
+${subagentDirective}
 
 CRITICAL UNLIMITED OUTPUT DIRECTIVE:
 - You have NO length limits in your response. Do not over-summarize or truncate information.
@@ -1656,8 +2402,8 @@ Generate an <approval_card> block structured with one or more questions ('radio'
 </approval_card>
 The user will be able to select options or write custom responses directly in the UI.
 
-3. MANDATORY NEXT STEPS PROMPT SUGGESTIONS (MAXIMUM 5 SUGGESTIONS):
-At the very end of your response, after finishing your full explanation, code, or report, you MUST provide an array of between 2 and 5 highly relevant, contextual, space-efficient follow-up prompt suggestions that the user might want to ask or execute next.
+3. MANDATORY NEXT STEPS PROMPT SUGGESTIONS (EXACTLY 3 SUGGESTIONS):
+At the very end of your response, after finishing your full explanation, code, or report, you MUST provide an array of exactly 3 highly relevant, contextual, space-efficient follow-up prompt suggestions that the user might want to ask or execute next.
 CRITICAL BREVITY REQUIREMENTS FOR NEXT STEPS:
 - Each suggestion MUST be extremely short, concise, and space-efficient: strictly 2 to 4 words maximum, and under 30 characters in total.
 - NEVER output full sentences, long multi-clause queries, explanations, or paragraphs.
@@ -1671,7 +2417,7 @@ You MUST output them in this exact JSON block at the very end of your message:
   "Short prompt 3"
 ]
 </next_steps_suggestions>
-These must be tailored to the exact topic just discussed so the user can easily click them to continue.`;
+These must be tailored to the exact topic just discussed so the user can easily click them to continue.${mascotNoteLine}`;
 
     const userContentParts = [];
     
@@ -1691,7 +2437,7 @@ Main Page Content:
 ${screenData.pageContent || '(Page without accessible textual content)'}
 =============================================`;
 
-    userContentParts.push({ type: 'text', text: `${screenSummary}\n\nUser question or instruction:\n${userText}` });
+    userContentParts.push({ type: 'text', text: `${screenSummary}\n\nUser question or instruction:\n${multiAgentOn ? String(userText).replace(/^\s*\/teamwork\b\s*/i, '') : userText}` });
 
     if (screenshotDataUrl) {
       userContentParts.push({
@@ -1711,7 +2457,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
         if (m.role === 'user' || m.role === 'assistant') {
           historyMessages.push({
             role: m.role,
-            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            content: typeof m.content === 'string' ? stripAgentRuns(m.content) : JSON.stringify(m.content),
           });
         }
       }
@@ -1856,11 +2602,83 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
         }
       }
       if (!recovered || !String(recovered).trim()) {
-        throw new Error('El modelo no devolvio ninguna respuesta. Revisa tu API key, el modelo elegido o intentalo de nuevo.');
+        throw new Error(endpointInfo.isDirectCloud
+          ? 'El modelo no devolvio ninguna respuesta. Revisa tu API key, el modelo elegido o intentalo de nuevo.'
+          : 'El modelo no devolvio ninguna respuesta. Si usas el Bridge local, cierralo y abrelo de nuevo (puede seguir con una version vieja), o ejecuta Actualizar-AntigravityBridge.');
       }
       fullAnswer = String(recovered);
       if (runningTask) runningTask.fullAnswer = fullAnswer;
       broadcastMessage({ type: 'stream_chunk', taskId, sessionId, chunk: fullAnswer, fullAnswer });
+    }
+
+    // Multi-agent: run the sub-agents the lead asked for, hand their results back, and let it finish
+    let agentUsage = null;
+    if (multiAgentOn) {
+      const convo = [...payload.messages];
+      const totals = { inputTokens: 0, outputTokens: 0, model: resolvedModel };
+      const publish = (text) => {
+        fullAnswer = text;
+        if (runningTask) runningTask.fullAnswer = fullAnswer;
+        broadcastMessage({ type: 'stream_chunk', taskId, sessionId, chunk: '', fullAnswer });
+      };
+      const basePayload = {
+        model: resolvedModel,
+        temperature: payload.temperature,
+        max_tokens: payload.max_tokens,
+        max_output_tokens: payload.max_output_tokens,
+        ...getProviderModes(resolvedModel, settings, endpointInfo),
+        reasoning_effort: payload.reasoning_effort,
+        thinking_budget: payload.thinking_budget,
+      };
+      let settled = '';
+      let current = fullAnswer;
+      let spawnedTotal = 0;
+      for (let round = 0; round < SUBAGENT_LIMITS.rounds; round++) {
+        const parsed = parseSpawnBlocks(current);
+        const clean = parsed.clean;
+        const specs = parsed.specs.slice(0, SUBAGENT_LIMITS.maxAgents - spawnedTotal);
+        if (specs.length === 0) break;
+        const allowed = await requestAgentPermission(taskId, sessionId, specs, settings, abortController.signal);
+        if (!allowed) {
+          settled += clean ? clean + '\n\n' : '';
+          convo.push(
+            { role: 'assistant', content: clean || 'I wanted to delegate to sub-agents.' },
+            { role: 'user', content: 'The user did not allow sub-agents. Answer the request yourself, without delegating.' }
+          );
+          current = await streamChatText(endpointInfo, { ...payload, messages: convo }, abortController.signal, (t) => publish(settled + t));
+          break;
+        }
+        spawnedTotal += specs.length;
+        settled += clean ? clean + '\n\n' : '';
+        const runState = { agents: [] };
+        publish(settled + agentRunBlock(runState));
+        const out = await runSubAgents(specs, {
+          endpointInfo,
+          basePayload,
+          goal: String(userText || '').replace(/^\s*\/teamwork\b\s*/i, '').slice(0, 1500),
+          signal: abortController.signal,
+          onEvent: (ev) => {
+            applyAgentEvent(runState, ev);
+            publish(settled + agentRunBlock(runState));
+          },
+        });
+        // results the Bridge reports are authoritative for the final card
+        for (const r of out.results) applyAgentEvent(runState, { type: 'agent_done', ...r });
+        settled += agentRunBlock(runState) + '\n\n';
+        totals.inputTokens += out.usage.prompt_tokens || 0;
+        totals.outputTokens += out.usage.completion_tokens || 0;
+
+        convo.push(
+          { role: 'assistant', content: clean || 'Delegating to sub-agents.' },
+          { role: 'user', content: formatAgentResults(out.results.filter((r) => !r.parent)) + '\n\nUsing these results, write the final answer for the user. Only delegate again if something essential is missing.' }
+        );
+        totals.inputTokens += Math.ceil(JSON.stringify(convo).length / 4);
+        current = await streamChatText(endpointInfo, { ...payload, messages: convo }, abortController.signal, (t) => publish(settled + t));
+        totals.outputTokens += Math.ceil(current.length / 4);
+      }
+      current = parseSpawnBlocks(current).clean;
+      publish(settled + current);
+      if (totals.inputTokens || totals.outputTokens) agentUsage = totals;
     }
 
     // The Bridge reports a content-safety block as plain text inside a normal response.
@@ -1869,11 +2687,15 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
     if (fullAnswer.length < 800 && /blocked by content safety filters/i.test(fullAnswer)) {
       if (retryOnBlock) {
         console.warn('Response blocked by content safety filters; retrying once.');
+        mascotSet('retry');
         await new Promise((resolve) => setTimeout(resolve, 1200));
         return await handleChatStream(taskId, sessionId, userText, modelName, includeScreenshot, tabId, thinkingEffort, explicitProvider, false);
       }
       throw new Error('La respuesta fue bloqueada por los filtros de seguridad del modelo (se reintento una vez). Intenta de nuevo, reformula el mensaje o prueba con otro modelo.');
     }
+
+    const chatNote = extractMascotNote(fullAnswer);
+    fullAnswer = chatNote.text;
 
     // Task completed successfully
     broadcastMessage({
@@ -1882,6 +2704,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       sessionId,
       mode: 'chat',
       fullAnswer,
+      mascotNote: chatNote.note,
     });
 
     // Save into persistent session
@@ -1890,6 +2713,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
       content: fullAnswer,
       timestamp: Date.now(),
       mode: 'chat',
+      ...(agentUsage ? { agentUsage } : {}),
     });
 
     // Refresh live quota from Antigravity CLI via bridge
@@ -1938,7 +2762,14 @@ async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId, t
 
   broadcastMessage({ type: 'task_start', taskId, sessionId, mode: 'cowork' });
 
+  mascotBegin(settings, modelName || settings.selectedModel || DEFAULT_MODEL, explicitProvider, goalText);
+  mascot.session = { sessionId, model: modelName, tabId, effort: thinkingEffort, provider: explicitProvider };
+  const mascotNoteLine = settings.mascot !== false ? MASCOT_NOTE_LINE : '';
   const maxSteps = settings.maxSteps || 15;
+  const multiAgentOn = Boolean(settings.multiAgent) || /^\s*\/teamwork\b/i.test(goalText || '');
+  let agentBudget = SUBAGENT_LIMITS.maxAgents;
+  const agentState = { agents: [] };
+  const coworkAgentUsage = { inputTokens: 0, outputTokens: 0, model: modelName || settings.selectedModel || DEFAULT_MODEL };
   let currentStep = 0;
   let completed = false;
   let summary = '';
@@ -1995,7 +2826,7 @@ async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId, t
     const { screenData: initScreen } = await getPageContext(tabId, false);
 
     const plannerPrompt = `You are Antigravity Agent in COWORK Mode, an autonomous browser control copilot connected to Antigravity Bridge.
-Creating, invoking, or delegating tasks to subagents is STRICTLY PROHIBITED; all actions must be executed directly by you.
+${coworkSubagentLine(multiAgentOn, agentBudget)}
 The user has assigned you the following goal in the browser:
 GOAL: "${goalText}"
 
@@ -2175,7 +3006,7 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
 
       // 3. Ask model for next action
       const coworkerPrompt = `You are Antigravity Agent in COWORK Mode, an autonomous browser control agent connected to Antigravity Bridge.
-Creating, invoking, or delegating tasks to subagents is STRICTLY PROHIBITED; all actions must be executed directly by you.
+${coworkSubagentLine(multiAgentOn, agentBudget)}
 Your goal is to achieve the user's goal through action steps:
 GOAL: "${goalText}"
 
@@ -2194,7 +3025,7 @@ ${runningTask.steps.map(s => `- Step ${s.step}: [${s.action}] ${s.description} -
 You MUST reply ONLY with a JSON block with this strict format:
 {
   "thought": "Brief explanation of what you see and why you are taking this step",
-  "action": "click" | "type" | "scroll" | "navigate" | "wait" | "finish",
+  "action": "click" | "type" | "scroll" | "navigate" | "wait" | "finish"${multiAgentOn ? ' | "spawn_agents"' : ''},
   "selector": "Visible text of button/link, or CSS selector",
   "value": "Text to type if type action, or URL if navigate",
   "description": "User-friendly description in English of what you are doing"
@@ -2251,6 +3082,33 @@ You MUST reply ONLY with a JSON block with this strict format:
         });
         runningTask.stepWaitResolver = null;
         actionResult = `Navigated to ${stepPlan.value}`;
+      } else if (stepPlan.action === 'spawn_agents') {
+        if (!multiAgentOn) {
+          actionResult = 'Sub-agents are not enabled for this run. Do the work yourself.';
+        } else {
+          const requested = normalizeAgentSpecs(stepPlan.agents).slice(0, Math.max(0, agentBudget));
+          if (requested.length === 0) {
+            actionResult = agentBudget <= 0 ? 'The limit of 50 agents was reached. Do the rest yourself.' : 'No valid agents were given (each needs a "task").';
+          } else if (!(await requestAgentPermission(taskId, sessionId, requested, settings, abortController.signal))) {
+            actionResult = 'The user did not allow creating agents. Continue the task yourself.';
+          } else {
+            agentBudget -= requested.length;
+            const out = await runTabAgents(requested, {
+              settings, base, modelName, explicitProvider,
+              signal: abortController.signal,
+              goal: goalText,
+              idOffset: agentState.agents.length,
+              onEvent: (ev) => {
+                applyAgentEvent(agentState, ev);
+                const finished = agentState.agents.filter((a) => a.status !== 'running').length;
+                broadcastMessage({ type: 'cowork_step_start', taskId, sessionId, stepNumber: currentStep, status: `Agents: ${finished}/${agentState.agents.length} finished` });
+              },
+            });
+            coworkAgentUsage.inputTokens += out.usage.prompt_tokens;
+            coworkAgentUsage.outputTokens += out.usage.completion_tokens;
+            actionResult = formatAgentResults(out.results).slice(0, 8000);
+          }
+        }
       } else if (stepPlan.action === 'wait') {
         await new Promise(r => {
           runningTask.stepWaitResolver = r;
@@ -2272,7 +3130,7 @@ You MUST reply ONLY with a JSON block with this strict format:
       });
 
       // Evaluate whether action encountered an issue, and generate adaptive guidance for the next step (Never get stuck!)
-      const isFailed = typeof actionResult === 'string' && (
+      const isFailed = stepPlan.action !== 'spawn_agents' && typeof actionResult === 'string' && (
         actionResult.toLowerCase().includes('not found') ||
         actionResult.toLowerCase().includes('fail') ||
         actionResult.toLowerCase().includes('error') ||
@@ -2380,14 +3238,14 @@ Formatting instructions:
 - Use Markdown headers (##, ###), bold text, bullet/numbered lists and clean tables.
 - For math expressions or metrics, use LaTeX ($...).
 - Write in English with a clear, technical, professional tone.
-- At the very end of your report, provide an array of between 2 and 5 follow-up prompt suggestions in this exact block (CRITICAL: each suggestion MUST be extremely short and space-efficient, strictly 2 to 4 words maximum, under 30 characters each):
+- At the very end of your report, provide an array of exactly 3 follow-up prompt suggestions in this exact block (CRITICAL: each suggestion MUST be extremely short and space-efficient, strictly 2 to 4 words maximum, under 30 characters each):
 <next_steps_suggestions>
 [
   "Short next step 1",
   "Short next step 2",
   "Short next step 3"
 ]
-</next_steps_suggestions>`;
+</next_steps_suggestions>${mascotNoteLine}`;
 
     let finalReportMarkdown = '';
     try {
@@ -2435,6 +3293,12 @@ ${summary ? `> ${summary}\n` : ''}
 - If you require additional steps or adjustments, send another instruction in this chat.`;
     }
 
+    const coworkNote = extractMascotNote(finalReportMarkdown);
+    finalReportMarkdown = coworkNote.text;
+    if (agentState.agents.length) {
+      finalReportMarkdown += '\n\n' + agentRunBlock(agentState);
+    }
+
     broadcastMessage({
       type: 'task_complete',
       taskId,
@@ -2444,6 +3308,7 @@ ${summary ? `> ${summary}\n` : ''}
       plan: runningTask.plan,
       steps: runningTask.steps,
       summary: finalReportMarkdown,
+      mascotNote: coworkNote.note,
     });
 
     await appendMessageToSession(sessionId, {
@@ -2454,6 +3319,7 @@ ${summary ? `> ${summary}\n` : ''}
       steps: runningTask.steps,
       timestamp: Date.now(),
       mode: 'cowork',
+      ...(coworkAgentUsage.inputTokens || coworkAgentUsage.outputTokens ? { agentUsage: coworkAgentUsage } : {}),
     });
 
     // Refresh live quota from Antigravity CLI via bridge
@@ -3424,6 +4290,12 @@ chrome.runtime.onConnect.addListener((port) => {
             break;
           }
 
+          case 'agent_permission_response': {
+            const resolveFn = pendingAgentPermissions.get(msg.requestId);
+            if (resolveFn) resolveFn(Boolean(msg.allow));
+            break;
+          }
+
           case 'save_settings': {
             await saveSettings(msg.settings);
             await checkBridgeHealth();
@@ -3584,6 +4456,156 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const data = await res.json();
         const text = data.choices?.[0]?.message?.content || '';
         sendResponse?.({ success: true, text });
+      } catch (err) {
+        sendResponse?.({ success: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === 'mascot_ready') {
+    const shown = mascot.eligible && !mascot.dismissed && mascot.visible && mascot.state;
+    sendResponse?.({ state: shown ? mascot.state : null, text: shown ? mascotText() : '' });
+    if (shown && sender.tab?.id) mascot.tabs.add(sender.tab.id);
+    return true;
+  }
+
+  if (message?.type === 'mascot_dismiss') {
+    mascot.dismissed = true; // stays away until the next task
+    mascot.visible = false;
+    mascot.summoned = false;
+    mascot.panelOpen = false;
+    mascot.tabs.clear();
+    sendResponse?.({ success: true });
+    return true;
+  }
+
+  if (message?.type === 'mascot_pin' || message?.type === 'mascot_unpin') {
+    mascot.panelOpen = message.type === 'mascot_pin';
+    if (!mascot.panelOpen && !mascot.summoned && !MASCOT_STICKY.has(mascot.state)) {
+      mascot.visible = false;
+      mascotPush(false).catch(() => null);
+    }
+    sendResponse?.({ success: true });
+    return true;
+  }
+
+  // The side panel asks the Bridge through here when the browser refuses its own request (speech routes only)
+  if (message?.type === 'bridge_relay') {
+    (async () => {
+      try {
+        const path = String(message.path || '');
+        if (!path.startsWith('/v1/stt/')) throw new Error('Not allowed');
+        const settings = await getSettings();
+        const base = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '').replace(/\/v1$/, '');
+        const init = { method: message.method || 'GET', signal: AbortSignal.timeout(60000) };
+        if (message.contentType) init.headers = { 'Content-Type': message.contentType };
+        if (message.bodyB64) {
+          const binary = atob(message.bodyB64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          init.body = bytes;
+        }
+        const res = await fetch(base + path, init);
+        sendResponse({ ok: res.ok, status: res.status, text: await res.text() });
+      } catch (err) {
+        sendResponse({ ok: false, status: 0, text: '', error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === 'mascot_summon') {
+    mascotSummon().then((ok) => sendResponse?.({ success: ok })).catch(() => sendResponse?.({ success: false }));
+    return true;
+  }
+
+  if (message?.type === 'mascot_test') {
+    mascot.eligible = true;
+    mascot.dismissed = false;
+    mascot.summoned = false;
+    mascot.state = 'done';
+    const wasVisible = mascot.visible;
+    mascot.visible = true;
+    mascotPush(!wasVisible).catch(() => null);
+    sendResponse?.({ success: true });
+    return true;
+  }
+
+  // A normal chat message written to the mascot once the task has finished: it continues the same chat
+  if (message?.type === 'mascot_followup') {
+    (async () => {
+      try {
+        if (runningTask && runningTask.status === 'running') {
+          sendResponse?.({ success: false, error: 'Still working on the last request.' });
+          return;
+        }
+        const settings = await getSettings();
+        const session = mascot.session || { sessionId: await getActiveSessionId(), model: settings.selectedModel, tabId: null, effort: null, provider: null };
+        const text = String(message.text || '').slice(0, 8000);
+        const taskId = crypto.randomUUID();
+        await appendMessageToSession(session.sessionId, { role: 'user', content: text, timestamp: Date.now() });
+        broadcastMessage({ type: 'external_user_message', sessionId: session.sessionId, text });
+
+        const finished = new Promise((resolve) => {
+          const timer = setTimeout(() => { removeInternalListener(listener); resolve({ type: 'task_error', error: 'It took too long.' }); }, 10 * 60 * 1000);
+          const listener = (p) => {
+            if (p.taskId === taskId && (p.type === 'task_complete' || p.type === 'task_error' || p.type === 'task_aborted')) {
+              clearTimeout(timer);
+              removeInternalListener(listener);
+              resolve(p);
+            }
+          };
+          addInternalListener(listener);
+        });
+        handleChatStream(taskId, session.sessionId, text, session.model, false, session.tabId, session.effort, session.provider).catch((err) => {
+          console.warn('Mascot follow-up failed:', err);
+        });
+        const result = await finished;
+        if (result.type === 'task_complete') {
+          const answer = String(result.fullAnswer || result.summary || '')
+            .replace(/<(thought|think)>[\s\S]*?<\/\1>/gi, '')
+            .replace(/<next_steps_suggestions>[\s\S]*?(<\/next_steps_suggestions>|$)/gi, '')
+            .replace(/<agent_run>[\s\S]*?<\/agent_run>/gi, '')
+            .replace(/<approval_card>[\s\S]*?(<\/approval_card>|$)/gi, '')
+            .trim();
+          sendResponse?.({ success: true, text: answer || '…' });
+        } else {
+          sendResponse?.({ success: false, error: result.error || 'Cancelled.' });
+        }
+      } catch (err) {
+        sendResponse?.({ success: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === 'mascot_btw') {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        const targetModel = mascot.model || settings.selectedModel || DEFAULT_MODEL;
+        const endpointInfo = await resolveInferenceEndpoint(targetModel, settings.bridgeUrl, mascot.provider);
+        const history = Array.isArray(message.history) ? message.history.slice(-6) : [];
+        const res = await fetchInferenceWithFallback(endpointInfo, {
+          model: endpointInfo.model,
+          messages: [
+            { role: 'system', content: 'You are a quick side assistant ("By The Way"). The user asks a short question while another task runs elsewhere; you cannot see that task. Answer accurately and concisely, in the language of the question.' },
+            ...history,
+            { role: 'user', content: String(message.text || '').slice(0, 4000) },
+          ],
+          temperature: 0.5,
+          stream: false,
+          max_tokens: 2048,
+          ...getProviderModes(endpointInfo.model, settings, endpointInfo),
+        }, null);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          sendResponse?.({ success: false, error: `Error ${res.status}: ${errText || res.statusText}` });
+          return;
+        }
+        const data = await res.json();
+        sendResponse?.({ success: true, text: data.choices?.[0]?.message?.content || '' });
       } catch (err) {
         sendResponse?.({ success: false, error: err.message || String(err) });
       }
@@ -3767,6 +4789,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ─── Chrome Commands Listener (Alt+Shift+A) ──────────────────────────────────
 if (chrome.commands && chrome.commands.onCommand) {
   chrome.commands.onCommand.addListener(async (command) => {
+    if (command === 'summon_mascot') {
+      mascotSummon().catch(() => null);
+      return;
+    }
     if (command === '_execute_action' || command === 'open_side_panel') {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

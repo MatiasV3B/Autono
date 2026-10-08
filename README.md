@@ -190,9 +190,21 @@ The **Model Bridge** is a small program that runs on your PC and lets Autono use
 ### Pick a model and how hard it thinks
 Click the model button at the top:
 - **Tabs:** `Antigravity` · `Claude` · `OpenAI`.
-- **Reasoning level:** Low / Medium / High (Claude and OpenAI also offer X-High and Max; Claude Haiku offers Fast or Thinking).
-- **Engine:** in the preview panel, switch between **Local Terminal** and **API**.
+- **Preview:** the picker only describes the model (price and benchmarks).
+- **Reasoning:** the **Reasoning** button in the prompt box opens a slider above it; drag it to the level you want (Low / Medium / High, plus X-High and Max on Claude and OpenAI).
+- **Engine:** the **Engine** button in the top bar switches between **Local Terminal** and the provider's **API**.
 - **🔄 Reload models:** fetches the current list from your Bridge and/or your API keys and keeps only the newest model of each family so the list stays short and clear.
+
+### Multi-agent 🧩
+Turn on **Settings → Multi-agent** (or start one request with `/teamwork`) and the assistant can split a big request into **sub-agents** that work in parallel. Each sub-agent gets its own assistant prompt and runs in its own terminal on the Bridge (or as a separate API call in API mode); when it finishes, its result goes back to the main assistant, which writes the final answer. A card in the chat shows every agent's progress. It works with Antigravity, Claude and OpenAI, in Local Terminal or API mode.
+
+**In Cowork** the same switch lets the agent open up to 50 agents, each in its own browser tab, working in parallel. Autono asks you before creating agents (you can turn that question off in Settings, but it warns that agents can use a lot of tokens).
+
+### Mascot 🦀
+An optional add-on (Settings → Mascot): a little pixel critter that walks onto the tab you are on when a task starts, when it needs your OK and when it finishes, so you do not have to keep checking. It plays a different animation depending on what the task is doing (reading the page, thinking, writing code, debugging, searching, agents running, finished). When it finishes, the model writes a one-line message that appears in its speech bubble, so you can see what it did without going back to the tab. It works with every model, API or local terminal. Press <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> to call it at any time and click it to ask a quick **/btw** question while a task runs; it answers without touching that task. Once the task has finished, clicking it opens a normal message box that continues the same chat, and double-clicking it sends it away. You can change the shortcut at `chrome://extensions/shortcuts`.
+
+### Context wheel and estimated cost
+Hover the ring next to the send button to see how the context is used (system prompt, page, attached files, conversation) with an estimated price for each part, the price of the next message and what the chat has cost so far. Prices are **estimates from list prices** (checked 2026-10-07 on the Anthropic, Google and OpenAI pricing pages), never your real bill. You can review and edit every price in **Settings → Model prices**. Local Terminal runs on your own subscription, so nothing is billed per token and the figures are the API-equivalent.
 
 ### Chat mode 💬
 Ask anything about the page. Autono reads the page content automatically (without changing it). Attach files, other tabs or a specific page element for extra context.
@@ -212,6 +224,9 @@ While it works, a glowing blue overlay shows the page is under Autono's control.
 
 ### More features
 - **Slash commands:** type `/` in the prompt box to see them (`/goal`, `/schedule`, `/grill-me`, `/teamwork`, `/learn`, …).
+- **Dictation:** press the sound-wave button in the prompt box, speak, and your words are typed into the box in the response language you chose. By default it uses the browser's speech recognition (audio goes to Google). The best engine is **NVIDIA Parakeet** (open source, English and Spanish, it detects the language by itself): it runs in your Bridge, is fast and accurate, and you install it from **Settings → Dictation** (engine about 150 MB, model about 650 MB, one time). Without it, Autono falls back to a small **Whisper Tiny** model that is built in (31 MB, offline, less accurate; English and Spanish). Nothing leaves your computer with either. Sound waves show while you talk, the words heard so far appear in light italics, and when you stop a spinner runs until the text is typed into the box. **Test dictation** checks that it works. The first time, Chrome asks for the microphone in a tab. Web search with TinyFish is always on for longer questions.
+- **Updates:** every time you open Autono it checks GitHub in the background. If something is newer, a banner says *New update available* with an **Update** button: it updates the Bridge and the extension files, restarts the Bridge, reloads Autono and keeps your chats and settings. **Settings → Updates and Bridge** also has *Check now* and a **hard reset** button that closes the Bridge completely, frees its port and opens it again.
+- **Read aloud:** the speaker button under every answer reads it with **Piper**, a local text-to-speech engine run by your Bridge. In **Settings → Voice** pick a voice for your language and download it (about 20 to 115 MB, one time); the engine itself installs with one click. You can also have every answer read automatically. Piper only speaks; it cannot transcribe.
 - **Chat history** with folders, search and rename. Titles are generated automatically by the model.
 - **Custom skills**, **MCP servers**, and up to **5 extra OpenAI-compatible providers** (for example OpenRouter or Groq).
 - **Themes, languages, typography and audio** options, plus an optional **web-search key** (TinyFish).

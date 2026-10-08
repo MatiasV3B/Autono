@@ -24,6 +24,7 @@
     if (!workOverlay || isWorkPaused) return;
     const banner = document.getElementById('__antigravity_overlay_banner');
     if (banner && banner.contains(e.target)) return;
+    if (e.target && e.target.id === '__autono_mascot_host') return; // the mascot stays clickable during a task
     
     // If the event is a direct user physical action (e.isTrusted === true),
     // prevent accidental user clicks from conflicting with the agent's work.
