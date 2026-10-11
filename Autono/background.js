@@ -1054,6 +1054,39 @@ function handleUserIntervention(text) {
   }).catch(() => null);
 }
 
+// --- Autono security: kill switch (A19) ---
+// Monotonic counter: cancelAllTasks() bumps it and writes the new value to window.__autono_abort in every
+// work tab (isolated world, same as the injected typing function). A typing call started earlier sees
+// "flag > value at start" and stops, without pressing Enter.
+let abortSeq = Date.now();
+const autonoWorkTabs = new Set(); // tabs opened by sub-agents
+
+async function setPageAbortFlag(tabId, value) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (v) => { window.__autono_abort = v; },
+      args: [value],
+    });
+  } catch (_) { /* tab gone or restricted */ }
+}
+
+function cancelAllTasks() {
+  abortSeq += 1;
+  const seq = abortSeq;
+  const tabs = new Set(autonoWorkTabs);
+  if (runningTask) {
+    runningTask.cancelled = true;
+    if (runningTask.tabId) tabs.add(runningTask.tabId);
+    try { runningTask.abortController?.abort(); } catch (_) {}
+    if (typeof runningTask.stepWaitResolver === 'function') runningTask.stepWaitResolver('aborted');
+  }
+  // pending permission / approval questions resolve as "no"
+  for (const finish of Array.from(pendingAgentPermissions.values())) { try { finish(false); } catch (_) {} }
+  for (const tId of tabs) setPageAbortFlag(tId, seq);
+}
+// --- end ---
+
 async function pauseCoworkTask(reason = 'user_pause') {
   if (!runningTask || runningTask.status !== 'running') return;
   runningTask.status = 'paused';
@@ -2340,6 +2373,7 @@ async function runTabAgents(specs, ctx) {
     try {
       const tab = await chrome.tabs.create({ url: spec.url || 'https://www.google.com', active: false });
       tabId = tab.id;
+      autonoWorkTabs.add(tabId); // Autono security (A19): reached by the kill switch
       await waitForTabLoadComplete(tabId);
       await triggerWorkOverlay(tabId, true, `Agent: ${spec.name}`).catch(() => null);
       await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
@@ -2361,6 +2395,7 @@ async function runTabAgents(specs, ctx) {
         }, signal);
         if (!res.ok) throw new Error(`Error ${res.status}: ${(await res.text().catch(() => '')) || res.statusText}`);
         const raw = (await res.json()).choices?.[0]?.message?.content || '{}';
+        if (signal?.aborted) break; // Autono security (A19): checked right after the model call
         usage.prompt_tokens += Math.ceil(prompt.length / 4);
         usage.completion_tokens += Math.ceil(raw.length / 4);
 
@@ -2407,6 +2442,7 @@ async function runTabAgents(specs, ctx) {
       result.error = err.message || 'Unknown error';
     } finally {
       if (tabId) {
+        autonoWorkTabs.delete(tabId);
         await triggerWorkOverlay(tabId, false).catch(() => null);
         chrome.tabs.remove(tabId).catch(() => null);
       }
@@ -3633,7 +3669,7 @@ async function executeClickAction(tabId, target) {
 
         const el = findInteractiveElement(targetSelector, false);
         if (!el) {
-          return `Element not found: "${targetSelector}". Continuing with an alternative action.`;
+          return `Element not found: ${JSON.stringify(String(targetSelector || '').replace(/\s+/g, ' ').slice(0, 60))}. Continuing with an alternative action.`;
         }
 
         el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
@@ -3670,8 +3706,9 @@ async function executeClickAction(tabId, target) {
           el.click();
         } catch (e) {}
 
+        // Autono security (A17): page-derived fragment, <= 60 chars, no newlines, JSON-encoded
         const label = el.innerText || el.value || el.getAttribute('placeholder') || el.getAttribute('aria-label') || targetSelector;
-        return `Click performed on "${(label || targetSelector).slice(0, 45)}"`;
+        return `Click performed on ${JSON.stringify(String(label || targetSelector || '').replace(/\s+/g, ' ').trim().slice(0, 60))}`;
       },
       args: [target],
     }).catch(e => [{ result: `Click failed: ${e.message}` }]);
@@ -3684,6 +3721,7 @@ async function executeClickAction(tabId, target) {
 }
 
 async function executeTypeAction(tabId, target, value) {
+  const abortSeqAtStart = abortSeq; // Autono security (A19): cancels issued after this point stop the typing loop
   try {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (isRestrictedUrl(tab?.url)) {
@@ -3691,7 +3729,9 @@ async function executeTypeAction(tabId, target, value) {
     }
     const execResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: async (targetSelector, textToType) => {
+      func: async (targetSelector, textToType, abortSeq) => {
+        // Autono security (A19): the cancel flag is written by cancelAllTasks() into this same isolated world
+        const cancelled = () => Number(window.__autono_abort || 0) > Number(abortSeq || 0);
         function findInteractiveElement(target, isInputOnly = true) {
           if (!target && !isInputOnly) return null;
           const rawTarget = String(target || '').trim();
@@ -3802,9 +3842,10 @@ async function executeTypeAction(tabId, target, value) {
 
         const el = findInteractiveElement(targetSelector, true);
         if (!el) {
-          return `Text field not found: "${targetSelector}". Continuing with another action.`;
+          return `Text field not found: ${JSON.stringify(String(targetSelector || '').replace(/\s+/g, ' ').slice(0, 60))}. Continuing with another action.`;
         }
 
+        if (cancelled()) return 'Typing cancelled by user';
         el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
         el.focus();
         if (typeof el.select === 'function') {
@@ -3813,6 +3854,7 @@ async function executeTypeAction(tabId, target, value) {
 
         // Brief natural hesitation upon focusing field
         await new Promise(r => setTimeout(r, 200 + Math.random() * 250));
+        if (cancelled()) return 'Typing cancelled by user';
 
         const rawText = textToType || '';
         const hasEnter = rawText.endsWith('\n') || rawText.includes('\n');
@@ -3828,6 +3870,7 @@ async function executeTypeAction(tabId, target, value) {
           const chars = Array.from(cleanText);
           for (let i = 0; i < chars.length; i++) {
             const ch = chars[i];
+            if (cancelled()) return 'Typing cancelled by user';
             document.execCommand('insertText', false, ch);
             el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ch }));
 
@@ -3848,6 +3891,7 @@ async function executeTypeAction(tabId, target, value) {
 
           for (let i = 0; i < chars.length; i++) {
             const ch = chars[i];
+            if (cancelled()) return 'Typing cancelled by user';
             currentTyped += ch;
 
             if (descriptor && descriptor.set) {
@@ -3894,6 +3938,7 @@ async function executeTypeAction(tabId, target, value) {
         if (hasEnter) {
           // Human hesitation before pressing Enter to submit
           await new Promise(r => setTimeout(r, 300 + Math.random() * 250));
+          if (cancelled()) return 'Typing cancelled by user'; // never press Enter / submit after a cancel
           const enterDown = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
           const enterUp = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
           el.dispatchEvent(enterDown);
@@ -3904,10 +3949,12 @@ async function executeTypeAction(tabId, target, value) {
           }
         }
 
+        // Autono security (A17): page-derived fragment, <= 60 chars, no newlines, JSON-encoded
         const label = el.getAttribute('placeholder') || el.getAttribute('name') || el.id || targetSelector;
-        return `Typed text in field "${label}": "${cleanText.slice(0, 30)}"`;
+        const shortLabel = String(label || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        return `Typed text in field ${JSON.stringify(shortLabel)}: ${JSON.stringify(cleanText.replace(/\s+/g, ' ').slice(0, 30))}`;
       },
-      args: [target, value || ''],
+      args: [target, value || '', abortSeqAtStart],
     }).catch(e => [{ result: `Typing failed: ${e.message}` }]);
 
     const res = execResults?.[0];
@@ -4344,6 +4391,9 @@ chrome.runtime.onConnect.addListener((port) => {
           }
 
           case 'start_chat': {
+            if (runningTask) { // Autono security (A19)
+              return port.postMessage({ type: 'task_error', taskId: msg.taskId, sessionId: msg.sessionId, error: 'Another task is already running. Stop it first.' });
+            }
             const tab = await getActiveWebTab();
             const textToSave = msg.displayPrompt || cleanPromptForHistory(msg.userText);
             await appendMessageToSession(msg.sessionId, {
@@ -4352,13 +4402,16 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               hasScreenshot: !!msg.includeScreenshot,
             });
-            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort, msg.provider).catch((err) => {
+            handleChatStream(msg.taskId, msg.sessionId, msg.userText, msg.modelName, msg.includeScreenshot, tab?.id || null, msg.thinkingEffort, msg.provider, true, AS.normalizeContextBlocks(msg.contextBlocks)).catch((err) => {
               console.warn('Unhandled chat stream error:', err);
             });
             break;
           }
 
           case 'start_cowork': {
+            if (runningTask) { // Autono security (A19)
+              return port.postMessage({ type: 'task_error', taskId: msg.taskId, sessionId: msg.sessionId, error: 'Another task is already running. Stop it first.' });
+            }
             let tab = await getActiveWebTab();
             tab = await ensureUsableTabForCowork(tab);
             if (!tab?.id) {
@@ -4375,7 +4428,7 @@ chrome.runtime.onConnect.addListener((port) => {
               timestamp: Date.now(),
               mode: 'cowork',
             });
-            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort, msg.provider).catch((err) => {
+            handleCoworkTask(msg.taskId, msg.sessionId, msg.goalText, msg.modelName, tab.id, msg.thinkingEffort, msg.provider, AS.normalizeContextBlocks(msg.contextBlocks)).catch((err) => {
               console.warn('Unhandled cowork task error:', err);
             });
             break;
@@ -4388,14 +4441,7 @@ chrome.runtime.onConnect.addListener((port) => {
           }
 
           case 'cancel_task': {
-            if (runningTask) {
-              if (runningTask.abortController) {
-                runningTask.abortController.abort();
-              }
-              if (typeof runningTask.stepWaitResolver === 'function') {
-                runningTask.stepWaitResolver('aborted');
-              }
-            }
+            cancelAllTasks(); // Autono security (A19)
             break;
           }
 
@@ -4660,7 +4706,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'mascot_followup') {
     (async () => {
       try {
-        if (runningTask && runningTask.status === 'running') {
+        if (runningTask) { // Autono security (A19): running or paused, never start a second task
           sendResponse?.({ success: false, error: 'Still working on the last request.' });
           return;
         }
@@ -4762,14 +4808,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'cancel_task') {
-    if (runningTask) {
-      if (runningTask.abortController) {
-        runningTask.abortController.abort();
-      }
-      if (typeof runningTask.stepWaitResolver === 'function') {
-        runningTask.stepWaitResolver('aborted');
-      }
-    }
+    cancelAllTasks(); // Autono security (A19)
     sendResponse?.({ success: true });
     return true;
   }
