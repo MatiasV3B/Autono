@@ -7,10 +7,19 @@ import { searchWithTinyFish, formatTinyFishForPrompt } from '../lib/tinyfish.js'
 import katex from './vendor/katex.mjs';
 import { marked } from './vendor/marked.esm.js';
 import { SpeechSegmenter, cleanTranscript, SAMPLE_RATE } from './dictation-vad.js';
+import { sanitizeHtml, escapeText } from './sanitize.js';
 
 marked.setOptions({
   gfm: true,
   breaks: true,
+});
+// Raw HTML typed (or injected) in model output is shown as text, never parsed; task-list inputs become plain text.
+// The result of marked is additionally passed through sanitizeHtml() in renderMarkdown().
+marked.use({
+  renderer: {
+    html(token) { return escapeText((token && (token.text ?? token.raw)) || ''); },
+    checkbox(token) { return token && token.checked ? '[x] ' : '[ ] '; },
+  },
 });
 
 (function () {
@@ -1167,8 +1176,12 @@ marked.setOptions({
           currentCoworkBubble = null;
           currentPlanData = null;
         } else {
-          const errRow = createMessageRow('assistant', errorCardHtml);
-          if (errRow) attachErrorCardRetryListener(errRow);
+          // Trusted, extension-generated markup: inserted directly, not through renderMarkdown/the sanitiser
+          const errRow = createMessageRow('assistant', '');
+          if (errRow) {
+            errRow.innerHTML = errorCardHtml;
+            attachErrorCardRetryListener(errRow);
+          }
         }
         scrollToBottom();
         break;
@@ -8574,12 +8587,13 @@ You are a world-class principal software engineer.
   }
 
   function downloadPdfDocument(filename, title, content) {
-    const renderedBody = content.startsWith('<') ? content : marked.parse(content);
+    const renderedBody = sanitizeHtml(content.startsWith('<') ? content : marked.parse(content));
     const printDoc = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${title || filename}</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <title>${escapeText(title || filename)}</title>
   <style>
     @page { size: A4; margin: 18mm; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.6; margin: 0; padding: 24px; }
@@ -8600,6 +8614,7 @@ You are a world-class principal software engineer.
 </html>`;
     const blob = new Blob([printDoc], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
     const win = window.open(url, '_blank');
     if (win) {
       win.addEventListener('load', () => {
@@ -8618,11 +8633,11 @@ You are a world-class principal software engineer.
   }
 
   function downloadDocxDocument(filename, title, content) {
-    const renderedBody = content.startsWith('<') ? content : marked.parse(content);
+    const renderedBody = sanitizeHtml(content.startsWith('<') ? content : marked.parse(content));
     const wordDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head>
   <meta charset="utf-8">
-  <title>${title || filename}</title>
+  <title>${escapeText(title || filename)}</title>
   <!--[if gte mso 9]>
   <xml>
     <w:WordDocument>
@@ -8684,7 +8699,11 @@ You are a world-class principal software engineer.
           previewEl.innerHTML = '';
         } else {
           previewEl.classList.remove('hidden');
-          previewEl.innerHTML = content;
+          // An <img> never runs scripts nor loads anything external, unlike inline <svg> in the privileged panel
+          const img = document.createElement('img');
+          img.alt = 'SVG preview';
+          img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(content);
+          previewEl.appendChild(img);
         }
       }
       return;
@@ -8695,21 +8714,9 @@ You are a world-class principal software engineer.
       consoleEl.classList.remove('hidden');
       consoleEl.classList.remove('error');
       consoleEl.textContent = '⏳ Running JavaScript...';
-      const logs = [];
-      const fakeConsole = {
-        log: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        error: (...args) => logs.push('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        warn: (...args) => logs.push('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-      };
-      try {
-        const runFn = new Function('console', content);
-        const result = runFn(fakeConsole);
-        if (result !== undefined) logs.push(`=> ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`);
-        consoleEl.textContent = logs.length > 0 ? logs.join('\n') : '✓ Executed successfully — no console output';
-      } catch (err) {
-        consoleEl.classList.add('error');
-        consoleEl.textContent = `❌ Execution error: ${err.message}`;
-      }
+      // In-panel JavaScript execution was removed (dynamic code is not allowed in the extension)
+      consoleEl.classList.add('error');
+      consoleEl.textContent = 'JavaScript execution is disabled in Autono. Copy the code and run it in your own environment.';
       return;
     }
 
@@ -9551,6 +9558,10 @@ You are a world-class principal software engineer.
       html = escapeHtml(processed).replace(/\n/g, '<br>');
     }
 
+    // Allowlist sanitiser (tags, attributes, link and image schemes; links get target/rel). Everything the
+    // extension adds itself (math, sub-agent cards, table header, reasoning, approval mounts) comes AFTER this.
+    html = sanitizeHtml(html, { extensionBase: chrome.runtime.getURL('') });
+
     // 7. Restore Math Tokens in HTML safely without regex substitution collision
     for (const [id, val] of mathMap.entries()) {
       const pWrapped = `<p>${id}</p>`;
@@ -9565,9 +9576,6 @@ You are a world-class principal software engineer.
       const pWrapped = `<p>${id}</p>`;
       html = html.includes(pWrapped) ? html.replaceAll(pWrapped, () => val) : html.replaceAll(id, () => val);
     }
-
-    // Ensure links open safely in a new tab
-    html = html.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
 
     // Wrap tables in responsive scroll container with interactive actions header
     const tableHeaderHtml = '<div class="table-actions-header">' +
@@ -9620,28 +9628,7 @@ You are a world-class principal software engineer.
 
   function sanitizeTableHtml(rawHtml) {
     if (!rawHtml || typeof rawHtml !== 'string') return '';
-    const temp = document.createElement('div');
-    temp.innerHTML = rawHtml;
-
-    // Disallow dangerous elements completely
-    const forbiddenTags = ['script', 'iframe', 'object', 'embed', 'link', 'style', 'form', 'input', 'button', 'svg', 'math'];
-    forbiddenTags.forEach(tag => {
-      temp.querySelectorAll(tag).forEach(el => el.remove());
-    });
-
-    // Remove all event handler attributes and unsafe hrefs/srcs
-    temp.querySelectorAll('*').forEach(el => {
-      const attrs = Array.from(el.attributes);
-      for (const attr of attrs) {
-        const name = attr.name.toLowerCase();
-        const val = attr.value.trim().toLowerCase();
-        if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('data:text/html')) {
-          el.removeAttribute(attr.name);
-        }
-      }
-    });
-
-    return temp.innerHTML;
+    return sanitizeHtml(rawHtml, { extensionBase: chrome.runtime.getURL('') });
   }
 
   function openTableInFullTab(tableHtml) {
@@ -9650,7 +9637,7 @@ You are a world-class principal software engineer.
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
   <title>Autono — Table View</title>
   <style>
     body {
@@ -9710,6 +9697,7 @@ You are a world-class principal software engineer.
     const blob = new Blob([pageHtml], { type: 'text/html' });
     const blobUrl = URL.createObjectURL(blob);
     chrome.tabs.create({ url: blobUrl });
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   }
 
   // ─── Direct Runtime Message Listener for Panel Close & Context Menu ────────
