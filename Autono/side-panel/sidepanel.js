@@ -97,6 +97,7 @@ marked.setOptions({
 
   // Active Approval Cards Registry
   const activeApprovalCards = new Map();
+  let allowCodeExecutionEnabled = false; // Autono security: mirrors the allowCodeExecution setting (default off)
 
   // ─── State ──────────────────────────────────────────────────────────────────
   let port = null;
@@ -961,6 +962,17 @@ marked.setOptions({
         if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showAgentPermissionCard(msg);
         break;
+
+      // --- Autono security: action approval cards ---
+      case 'action_permission_request':
+        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
+        showActionPermissionCard(msg);
+        break;
+
+      case 'action_permission_resolved':
+        resolveActionPermissionCard(msg.requestId, 'Closed');
+        break;
+      // --- end ---
 
       case 'task_start':
         isGenerating = true;
@@ -4619,7 +4631,7 @@ marked.setOptions({
 
       content.innerHTML = introHtml + planHtml + reportHtml;
       row.appendChild(content);
-      mountAllApprovalCards(content);
+      mountAllApprovalCards(content, true); // Autono security: cards restored from history are inert
       if (rawContent) {
         appendStreamingResponseBar(content, rawContent, (activePlan?.sources || []));
       }
@@ -6023,6 +6035,11 @@ marked.setOptions({
 
     const autonomyInput = document.getElementById('settingAutonomyMode');
     if (autonomyInput && s.autonomyMode) autonomyInput.value = s.autonomyMode;
+    // --- Autono security: code execution is off unless the user turned it on ---
+    allowCodeExecutionEnabled = s.allowCodeExecution === true;
+    const allowCodeInput = document.getElementById('settingAllowCodeExecution');
+    if (allowCodeInput) allowCodeInput.checked = allowCodeExecutionEnabled;
+    // --- end ---
 
     const visionInput = document.getElementById('settingVisionScreenshots');
     if (visionInput && s.visionScreenshots !== undefined) visionInput.checked = Boolean(s.visionScreenshots);
@@ -6636,6 +6653,7 @@ marked.setOptions({
       defaultThinking: document.getElementById('settingDefaultThinking')?.value || 'medium',
       systemPrompt: enrichedSysPrompt,
       autonomyMode: document.getElementById('settingAutonomyMode')?.value || 'supervised',
+      allowCodeExecution: document.getElementById('settingAllowCodeExecution')?.checked === true, // Autono security
       visionScreenshots: document.getElementById('settingVisionScreenshots')?.checked ?? true,
       actionDelay: parseInt(document.getElementById('settingActionDelay')?.value || '350', 10),
       gridOpacity: document.getElementById('settingGridOpacity')?.value || '0.065',
@@ -8179,7 +8197,7 @@ You are a world-class principal software engineer.
   }
 
   // ─── ApprovalCard (Human-in-the-Loop) Mount & Interactivity ─────────────────
-  function mountAllApprovalCards(container = document) {
+  function mountAllApprovalCards(container = document, inert = false) {
     if (!container) return;
     const mounts = container.querySelectorAll('.approval-card-mount:not([data-mounted="true"])');
     mounts.forEach((el) => {
@@ -8187,11 +8205,87 @@ You are a world-class principal software engineer.
       const cardData = activeApprovalCards.get(cardId);
       if (!cardData) return;
       el.setAttribute('data-mounted', 'true');
+      if (inert) {
+        // --- Autono security: a saved card never becomes interactive again ---
+        el.textContent = 'This question has expired. Send a new request if you still want it.';
+        el.classList.add('approval-card-expired');
+        return;
+      }
       mountApprovalCard(el, cardData);
     });
   }
 
+  // --- Autono security: fixed, extension-authored Cowork confirmation (ignores model-written questions/options) ---
+  function mountCoworkRequestCard(containerEl, cardData) {
+    const goal = typeof cardData.goal === 'string' ? cardData.goal.trim() : '';
+    containerEl.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'agent-permission-card action-permission-card';
+    const title = document.createElement('div');
+    title.className = 'agent-permission-title';
+    title.textContent = 'Start Cowork on this goal?';
+    const goalLabel = document.createElement('div');
+    goalLabel.className = 'action-perm-label';
+    goalLabel.textContent = 'Goal (exactly what the agent will be told to do)';
+    const goalBox = document.createElement('pre');
+    goalBox.className = 'action-perm-goal';
+    goalBox.textContent = goal || '(the assistant did not provide a goal)';
+    const originLine = document.createElement('div');
+    originLine.className = 'action-perm-label';
+    originLine.textContent = 'Current tab: checking...';
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        let o = 'unknown';
+        try { o = new URL(tabs && tabs[0] && tabs[0].url).origin; } catch (e) { /* internal page */ }
+        originLine.textContent = `Current tab: ${o}`;
+      });
+    } catch (e) { originLine.textContent = 'Current tab: unknown'; }
+    const note = document.createElement('div');
+    note.className = 'agent-permission-warning';
+    note.textContent = 'Cowork clicks and types in your browser using your logged-in sessions. You will still be asked before sensitive actions.';
+    const actions = document.createElement('div');
+    actions.className = 'agent-permission-actions';
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'agent-perm-btn allow';
+    startBtn.textContent = 'Start Cowork';
+    startBtn.disabled = !goal;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'agent-perm-btn';
+    cancelBtn.textContent = 'Cancel';
+    const done = (text) => {
+      containerEl.textContent = '';
+      const r = document.createElement('div');
+      r.className = 'agent-permission-card resolved';
+      r.textContent = text;
+      containerEl.appendChild(r);
+    };
+    startBtn.addEventListener('click', () => {
+      if (startBtn.disabled) return;
+      startBtn.disabled = true;
+      cancelBtn.disabled = true;
+      done('Cowork started');
+      triggerCoworkExecution(goal);
+    });
+    cancelBtn.addEventListener('click', () => {
+      startBtn.disabled = true;
+      done('Cowork cancelled');
+      showToast('Continuing in standard conversation mode');
+    });
+    actions.append(startBtn, cancelBtn);
+    box.append(title, goalLabel, goalBox, originLine, note, actions);
+    containerEl.appendChild(box);
+  }
+  // --- end ---
+
   function mountApprovalCard(containerEl, cardData) {
+    // --- Autono security: cowork_request never uses the model's questions or options ---
+    if (cardData && cardData.action === 'cowork_request') {
+      mountCoworkRequestCard(containerEl, cardData);
+      return;
+    }
+    // --- end ---
     const questions = Array.isArray(cardData.questions) && cardData.questions.length > 0
       ? cardData.questions
       : [{
@@ -8384,18 +8478,7 @@ You are a world-class principal software engineer.
       sent = true;
       render();
 
-      if (cardData.action === 'cowork_request') {
-        const picked = answers[0] || [];
-        const customText = (custom[0] || '').toLowerCase();
-        const isAffirmative = picked.includes(0) || customText.includes('yes') || customText.includes('sí') || customText.includes('si') || customText.includes('start') || customText.includes('enable');
-
-        if (isAffirmative) {
-          const goal = cardData.goal || 'Execute browser automation actions';
-          triggerCoworkExecution(goal);
-        } else {
-          showToast('Continuing in standard conversation mode');
-        }
-      } else {
+      {
         const formatted = [];
         questions.forEach((qu, i) => {
           const selectedIndices = answers[i] || [];
@@ -8405,9 +8488,12 @@ You are a world-class principal software engineer.
           formatted.push(`- **${qu.q}**: ${chosenOpts.join(', ') || 'No answer'}`);
         });
         const responseText = `I have selected the following options:\n${formatted.join('\n')}`;
-        setTimeout(() => {
-          sendUserMessage(responseText);
-        }, 500);
+        // --- Autono security: the answer is placed in the message box for the user to read and send; it is never auto-sent ---
+        promptInput.value = responseText;
+        promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+        promptInput.focus();
+        showToast('Review your answer and press send');
+        // --- end ---
       }
     }
 
@@ -8658,6 +8744,35 @@ You are a world-class principal software engineer.
     showToast(`✓ Word document downloaded: ${a.download}`);
   }
 
+  // --- Autono security: per-run confirmation that shows the full code ---
+  function confirmCodeRun(lang, code) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'code-run-modal-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      const box = document.createElement('div');
+      box.className = 'code-run-modal';
+      box.appendChild(apEl('div', 'agent-permission-title', `Run this ${lang} code?`));
+      box.appendChild(apEl('div', 'agent-permission-warning', 'This runs on your computer through the Bridge, with your user permissions. Read all of it first.'));
+      box.appendChild(apEl('pre', 'action-perm-goal code-run-code', code));
+      const actions = apEl('div', 'agent-permission-actions');
+      const finish = (v) => { overlay.remove(); resolve(v); };
+      const run = apEl('button', 'agent-perm-btn allow', 'Run on my computer');
+      run.type = 'button';
+      run.addEventListener('click', () => finish(true));
+      const cancel = apEl('button', 'agent-perm-btn', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => finish(false));
+      actions.append(run, cancel);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      cancel.focus();
+    });
+  }
+  // --- end ---
+
   async function executeCodeArtifact(artifact, consoleEl, previewEl) {
     if (!artifact) return;
     const { lang, content, type } = artifact;
@@ -8690,31 +8805,29 @@ You are a world-class principal software engineer.
       return;
     }
 
-    if (lang === 'javascript' || lang === 'js') {
-      if (!consoleEl) return;
-      consoleEl.classList.remove('hidden');
-      consoleEl.classList.remove('error');
-      consoleEl.textContent = '⏳ Running JavaScript...';
-      const logs = [];
-      const fakeConsole = {
-        log: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        error: (...args) => logs.push('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        warn: (...args) => logs.push('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-      };
-      try {
-        const runFn = new Function('console', content);
-        const result = runFn(fakeConsole);
-        if (result !== undefined) logs.push(`=> ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`);
-        consoleEl.textContent = logs.length > 0 ? logs.join('\n') : '✓ Executed successfully — no console output';
-      } catch (err) {
-        consoleEl.classList.add('error');
-        consoleEl.textContent = `❌ Execution error: ${err.message}`;
+    // --- Autono security: Markdown preview is local text only (never sent to the Bridge); dead new Function() path removed ---
+    if (type === 'markdown' || lang === 'md' || lang === 'markdown' || artifact.ext === 'md') {
+      if (previewEl) {
+        const isShown = !previewEl.classList.contains('hidden');
+        previewEl.classList.toggle('hidden', isShown);
+        previewEl.textContent = isShown ? '' : content;
       }
       return;
     }
+    // --- end ---
 
-    // Python / Bash / Shell via AntigravityBridge
+    // Python / Bash / Shell / JavaScript via AntigravityBridge (explicitly enabled and confirmed per run)
     if (!consoleEl) return;
+    // --- Autono security: code execution gate ---
+    if (!allowCodeExecutionEnabled || artifact.tainted !== false) {
+      consoleEl.classList.remove('hidden');
+      consoleEl.classList.add('error');
+      consoleEl.textContent = 'Running code is turned off, or this answer used web or page content. Copy the code and review it before running it yourself.';
+      return;
+    }
+    const confirmedRun = await confirmCodeRun(lang, content);
+    if (!confirmedRun) return;
+    // --- end ---
     consoleEl.classList.remove('hidden');
     consoleEl.classList.remove('error');
     consoleEl.textContent = `⏳ Running ${lang} via AntigravityBridge...`;
@@ -8756,6 +8869,10 @@ You are a world-class principal software engineer.
 
     const artifacts = extractFileArtifacts(rawText);
     if (!artifacts || artifacts.length === 0) return;
+    // --- Autono security: turns that carried page or web-search content never get a Run button. The open page is part
+    // of almost every turn, so this is fail-closed (tainted) until the background reports otherwise. ---
+    artifacts.forEach((a) => { a.tainted = true; });
+    // --- end ---
 
     const artifactsContainer = document.createElement('div');
     artifactsContainer.className = 'file-artifacts-container';
@@ -8792,8 +8909,8 @@ You are a world-class principal software engineer.
             <span>Vista Previa</span>
           </button>
           ` : ''}
-          ${['py', 'python', 'js', 'javascript', 'html', 'svg', 'sh', 'bash'].includes(art.lang) ? `
-          <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}">
+          ${allowCodeExecutionEnabled && ['py', 'python', 'js', 'javascript', 'sh', 'bash'].includes(art.lang) ? `
+          <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}" ${art.tainted !== false ? 'disabled' : ''}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <span>Ejecutar</span>
           </button>
@@ -9295,43 +9412,135 @@ You are a world-class principal software engineer.
   }
 
   // Asks the user before the assistant creates agents; the answer goes back to the background worker
+  // --- Autono security: honest card (start origin, full task via textContent, "for this task only") ---
+  function apEl(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
   function showAgentPermissionCard(req) {
     welcomeHero.classList.add('hidden');
     messagesContainer.classList.remove('hidden');
-    const card = document.createElement('div');
-    card.className = 'agent-permission-card';
-    const list = (req.agents || []).slice(0, 12).map((a) => `<li><strong>${escapeHtml(a.name)}</strong>${a.task ? ` <span>${escapeHtml(a.task)}</span>` : ''}</li>`).join('');
-    const more = (req.count || 0) > 12 ? `<li class="more">and ${(req.count || 0) - 12} more...</li>` : '';
-    card.innerHTML = `
-      <div class="agent-permission-title">Create ${req.count} agent${req.count === 1 ? '' : 's'}?</div>
-      <ul class="agent-permission-list">${list}${more}</ul>
-      <div class="agent-permission-warning">Every agent makes its own model calls (in Cowork it also opens its own browser tab). This can use a lot of tokens.</div>
-      <div class="agent-permission-actions">
-        <button type="button" data-act="allow" class="agent-perm-btn allow">Allow</button>
-        <button type="button" data-act="deny" class="agent-perm-btn">Deny</button>
-        <button type="button" data-act="always" class="agent-perm-btn subtle" title="Stop asking from now on (you can turn it back on in Settings)">Allow and don't ask again</button>
-      </div>`;
+    const card = apEl('div', 'agent-permission-card');
+    const count = req.count || (req.agents || []).length;
+    card.appendChild(apEl('div', 'agent-permission-title', `Create ${count} agent${count === 1 ? '' : 's'}?`));
+    const lim = req.limits || {};
+    card.appendChild(apEl('div', 'agent-permission-warning', lim.usesBrowser === false
+      ? `Each agent makes its own model calls (no browser). Helpers they create count against the same limit of 50.`
+      : `${lim.tabs || count} tab${(lim.tabs || count) === 1 ? '' : 's'} at a time, up to ${lim.stepsPerAgent || 15} actions each, using your logged-in sessions. New sites and sensitive actions still ask you.`));
+    const list = apEl('div', 'agent-permission-list');
+    (req.agents || []).slice(0, 12).forEach((a) => {
+      const det = document.createElement('details');
+      det.className = 'action-perm-agent-item';
+      const sum = document.createElement('summary');
+      sum.textContent = `${a.name}${a.startOrigin ? ' - starts at ' + a.startOrigin : ''}`;
+      det.appendChild(sum);
+      if (a.startUrl) det.appendChild(apEl('div', 'action-perm-value mono', `Start URL: ${a.startUrl}`));
+      if (a.role) det.appendChild(apEl('div', 'action-perm-value', `Role: ${a.role}`));
+      det.appendChild(apEl('div', 'action-perm-label', 'Task'));
+      det.appendChild(apEl('pre', 'action-perm-goal', a.task || ''));
+      list.appendChild(det);
+    });
+    if (count > 12) list.appendChild(apEl('div', 'action-perm-label', `and ${count - 12} more...`));
+    card.appendChild(list);
+    const actions = apEl('div', 'agent-permission-actions');
+    const mk = (act, label, cls, title) => {
+      const b = apEl('button', `agent-perm-btn ${cls || ''}`.trim(), label);
+      b.type = 'button';
+      b.setAttribute('data-act', act);
+      if (title) b.title = title;
+      return b;
+    };
+    actions.append(
+      mk('allow', 'Allow', 'allow'),
+      mk('task', 'Allow for this task only', '', 'Later agent requests in this same task are not asked again'),
+      mk('deny', 'Deny', '')
+    );
+    card.appendChild(actions);
     card.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = btn.getAttribute('data-act');
         const allow = act !== 'deny';
-        sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow });
-        if (act === 'always') {
-          const input = document.getElementById('settingAgentConfirm');
-          if (input) input.checked = false;
-          chrome.storage.local.get(['antigravity_settings'], (res) => {
-            const prev = res.antigravity_settings || {};
-            prev.agentConfirm = false;
-            chrome.storage.local.set({ antigravity_settings: prev });
-          });
-        }
+        sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow, forTask: act === 'task' });
         card.className = 'agent-permission-card resolved';
-        card.innerHTML = `<div class="agent-permission-title">${allow ? 'Agents approved' : 'Agents denied'}</div>`;
+        card.textContent = allow ? 'Agents approved' : 'Agents denied';
       });
     });
     messagesContainer.appendChild(card);
     scrollToBottom();
   }
+  // --- end ---
+
+  // --- Autono security: action approval card (built only from extension-computed facts, textContent everywhere) ---
+  const actionPermissionCards = new Map();
+
+  function resolveActionPermissionCard(requestId, label) {
+    const card = actionPermissionCards.get(requestId);
+    if (!card) return;
+    actionPermissionCards.delete(requestId);
+    card.className = 'agent-permission-card resolved';
+    card.textContent = label;
+  }
+
+  function showActionPermissionCard(req) {
+    welcomeHero.classList.add('hidden');
+    messagesContainer.classList.remove('hidden');
+    const d = req.details || {};
+    const titles = {
+      navigate: 'Open this address?',
+      page: 'The task reached a new or sensitive site. Continue here?',
+      click: 'Click this element?',
+      type: 'Type this text?',
+      incognito: 'Work in an incognito tab?',
+    };
+    const card = apEl('div', 'agent-permission-card action-permission-card');
+    card.appendChild(apEl('div', 'agent-permission-title', titles[d.kind] || 'Allow this action?'));
+    if (d.agent) card.appendChild(apEl('div', 'action-perm-label', `Agent: ${d.agent}`));
+    if (Array.isArray(d.reasons) && d.reasons.length) {
+      const ul = apEl('ul', 'agent-permission-list');
+      d.reasons.forEach((r) => ul.appendChild(apEl('li', null, r)));
+      card.appendChild(ul);
+    }
+    const row = (label, value, mono) => {
+      if (!value) return;
+      const r = apEl('div', 'action-perm-row');
+      r.appendChild(apEl('span', 'action-perm-label', `${label}: `));
+      r.appendChild(apEl('span', mono ? 'action-perm-value mono' : 'action-perm-value', value));
+      card.appendChild(r);
+    };
+    row('Address', d.destinationUrl, true);
+    row('Site', d.destinationOrigin, true);
+    row('Current page', d.pageUrl, true);
+    if (d.element) {
+      row('Element', [d.element.tag, d.element.type].filter(Boolean).join(' / '));
+      row('Text', d.element.text);
+      row('Link', d.element.href, true);
+      row('Form sends to', d.element.formAction, true);
+      row('Field', d.element.field);
+    }
+    if (d.typed !== null && d.typed !== undefined) row('Will type', d.typed, true);
+    const actions = apEl('div', 'agent-permission-actions');
+    const mk = (decision, label, cls) => {
+      const b = apEl('button', `agent-perm-btn ${cls || ''}`.trim(), label);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        sendPortMessage({ type: 'action_permission_response', requestId: req.requestId, decision });
+        resolveActionPermissionCard(req.requestId, decision === 'deny' ? 'Denied' : decision === 'stop' ? 'Task stopped' : 'Allowed');
+      });
+      return b;
+    };
+    actions.appendChild(mk('once', 'Allow once', 'allow'));
+    if (d.allowSite) actions.appendChild(mk('site', `Allow ${d.siteLabel || 'this site'} for this task`, ''));
+    actions.appendChild(mk('deny', 'Deny', ''));
+    actions.appendChild(mk('stop', 'Stop task', 'subtle'));
+    card.appendChild(actions);
+    actionPermissionCards.set(req.requestId, card);
+    messagesContainer.appendChild(card);
+    scrollToBottom();
+  }
+  // --- end ---
 
   function renderAgentRunHtml(data) {
     const agents = Array.isArray(data.agents) ? data.agents : [];

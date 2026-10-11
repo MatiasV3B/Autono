@@ -2579,7 +2579,7 @@ function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
           startOrigin: startCheck && startCheck.ok ? startCheck.origin : 'https://www.google.com',
         };
       }),
-      limits: { tabs: Math.min(specs.length, SUBAGENT_LIMITS.maxTabs), stepsPerAgent: 15, usesLoggedInSessions: true },
+      limits: { tabs: Math.min(specs.length, SUBAGENT_LIMITS.maxTabs), stepsPerAgent: 15, usesLoggedInSessions: true, usesBrowser: runningTask?.mode === 'cowork' },
       // --- end ---
     });
   });
