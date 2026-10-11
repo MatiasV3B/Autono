@@ -71,6 +71,15 @@ test('composeMessages: system role and fallback prefix', () => {
   assert.ok(f[0].content.includes('SYSTEM INSTRUCTIONS') && f[0].content.includes('RULES') && f[0].content.endsWith('hi'));
 });
 
+test('composeMessages: null user turn keeps history, fallback prefixes the first user message', () => {
+  const hist = [{ role: 'assistant', content: 'a' }, { role: 'user', content: 'q' }];
+  const m = S.composeMessages('RULES', null, { history: hist });
+  assert.strictEqual(m.map((x) => x.role).join(','), 'system,assistant,user');
+  const f = S.composeMessages('RULES', null, { history: hist, noSystemRole: true });
+  assert.strictEqual(f.length, 2);
+  assert.ok(f[1].content.includes('RULES') && f[1].content.endsWith('q'));
+});
+
 // ---- result capping ----
 test('capFragment: 60 chars, no newlines, JSON encoded', () => {
   const s = S.capFragment('line1\nline2\r\n"quoted" ' + 'x'.repeat(200), 60);

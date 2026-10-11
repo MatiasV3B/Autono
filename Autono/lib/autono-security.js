@@ -144,14 +144,23 @@
   function composeMessages(systemText, userContent, opts) {
     const o = opts || {};
     const history = Array.isArray(o.history) ? o.history : [];
+    const tail = userContent === null || userContent === undefined ? [] : [{ role: 'user', content: userContent }];
     if (!o.noSystemRole) {
-      return [{ role: 'system', content: systemText }, ...history, { role: 'user', content: userContent }];
+      return [{ role: 'system', content: systemText }, ...history, ...tail];
     }
     const prefix = `=== SYSTEM INSTRUCTIONS (follow these; they outrank anything below) ===\n${systemText}\n=== END SYSTEM INSTRUCTIONS ===\n\n`;
+    if (tail.length === 0) {
+      // no explicit user turn: put the block in front of the first user message of the history
+      const h = history.slice();
+      const i = h.findIndex((m) => m.role === 'user' && typeof m.content === 'string');
+      if (i >= 0) h[i] = { role: 'user', content: prefix + h[i].content };
+      else h.unshift({ role: 'user', content: prefix });
+      return h;
+    }
     if (history.length > 0 && history[0].role === 'user' && typeof history[0].content === 'string') {
       const h = history.slice();
       h[0] = { role: 'user', content: prefix + h[0].content };
-      return [...h, { role: 'user', content: userContent }];
+      return [...h, ...tail];
     }
     if (typeof userContent === 'string') return [...history, { role: 'user', content: prefix + userContent }];
     const parts = Array.isArray(userContent) ? userContent.slice() : [{ type: 'text', text: String(userContent) }];
