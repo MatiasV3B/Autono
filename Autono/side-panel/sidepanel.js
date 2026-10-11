@@ -4001,6 +4001,7 @@ marked.use({
       }
 
       isPickingFragment = true;
+      try { await chrome.runtime.sendMessage({ type: 'antigravity_picker_armed', tabId: tab.id }); } catch (_) { /* worker asleep: retried by the next message */ }
       try {
         await chrome.tabs.sendMessage(tab.id, { type: 'antigravity_start_picker' });
         showToast('Picker mode active: Click on an element or press Esc to cancel.');
@@ -9715,7 +9716,9 @@ You are a world-class principal software engineer.
   }
 
   // ─── Direct Runtime Message Listener for Panel Close & Context Menu ────────
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    // Only the extension's own pages / worker may drive the panel (never a content script on a web page)
+    if (!sender || sender.id !== chrome.runtime.id || (sender.url && !sender.url.startsWith(chrome.runtime.getURL('')))) return;
     if (msg?.type === 'close_side_panel') {
       window.close();
     } else if (msg?.type === 'CONTEXT_MENU_ASK_ANTIGRAVITY') {
@@ -9740,6 +9743,23 @@ You are a world-class principal software engineer.
       }
     }
   });
+
+  // ─── Links (XP-10): every real link opens through chrome.tabs.create and only if it is http(s) ───
+  function handleLinkActivation(e) {
+    const link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!link || link.hasAttribute('download')) return; // file downloads (blob:) are handled where they are made
+    const raw = link.getAttribute('href') || '';
+    if (raw === '' || raw.startsWith('#')) return; // in-page anchors keep their own handlers
+    e.preventDefault();
+    e.stopPropagation();
+    let url = null;
+    try { url = new URL(link.href); } catch (_) { url = null; }
+    if (url && (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
+      chrome.tabs.create({ url: url.href }).catch(() => null);
+    }
+  }
+  document.addEventListener('click', handleLinkActivation, true);
+  document.addEventListener('auxclick', handleLinkActivation, true);
 
   // ─── CSP-Safe Delegated Click & Keyboard Handlers for Dynamic Elements ─────
   document.addEventListener('click', (e) => {
