@@ -597,6 +597,29 @@
                   </div>
                 </div>
 
+                <!-- Autono security: privacy / trust switches (all off by default) -->
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Web search (TinyFish)</span>
+                    <span class="toggle-desc">Off by default. When on (and a TinyFish key is set) the text you type is sent to TinyFish (a third party) to fetch search results. Attachments and selections are never sent.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingWebSearchEnabled">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Send API keys to the local Bridge</span>
+                    <span class="toggle-desc">Off by default. Keys stay in the extension and are used directly with the provider. Turn on only if your Bridge must hold the keys itself.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingForwardKeysToBridge">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
                 <div class="setting-field">
                   <label for="settingDisplayMode">Extension Display Mode</label>
                   <select id="settingDisplayMode">
@@ -962,6 +985,27 @@
                   </label>
                 </div>
 
+                <!-- Autono security: pairing token + approvals for external control -->
+                <div class="setting-field" style="margin-top: 10px;">
+                  <label>Pairing token (the Bridge must send it as <code>X-Autono-Token</code>)</label>
+                  <div class="input-with-action">
+                    <input type="text" id="mcpPairingTokenDisplay" readonly placeholder="No token yet" spellcheck="false">
+                    <button type="button" id="mcpPairingTokenBtn" class="field-action-btn">Generate</button>
+                  </div>
+                  <div id="mcpPairingTokenNote" style="font-size: 11px; color: #94a3b8; margin-top: 4px;">The token is shown once, when generated. Copy it into the Bridge configuration.</div>
+                  <div id="mcpStatusLine" style="font-size: 11px; color: #94a3b8; margin-top: 4px;"></div>
+                </div>
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Auto-allow external actions</span>
+                    <span class="toggle-desc">Off by default: navigate, click, type, screenshot and browser tasks requested by an external agent ask for your approval in this panel.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingAutoAllowExternalActions">
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
                 <!-- Custom Localhost URL for MCP -->
                 <div class="setting-field" style="margin-top: 14px;">
                   <label for="settingLocalMcpUrl" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -1246,7 +1290,7 @@
                     <span class="toggle-desc">Keeps background tasks running smoothly even when the browser is minimized.</span>
                   </div>
                   <label class="switch">
-                    <input type="checkbox" id="settingShadowEnabled" checked>
+                    <input type="checkbox" id="settingShadowEnabled">
                     <span class="slider-toggle"></span>
                   </label>
                 </div>
@@ -1276,8 +1320,8 @@
                 <div class="setting-field">
                   <label for="settingShadowOnComplete">Action on Task Completion</label>
                   <select id="settingShadowOnComplete">
-                    <option value="none">Keep running</option>
-                    <option value="sleep" selected>Sleep PC</option>
+                    <option value="none" selected>Keep running</option>
+                    <option value="sleep">Sleep PC</option>
                     <option value="hibernate">Hibernate PC</option>
                     <option value="shutdown">Shutdown PC</option>
                   </select>
@@ -1863,6 +1907,7 @@
       </div>
     </div>
 
+    <script src="../lib/autono-security.js"></script>
     <script type="module" src="sidepanel.js"></script>
   </body>
 </html>

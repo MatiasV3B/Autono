@@ -16,6 +16,37 @@ marked.setOptions({
 (function () {
   'use strict';
 
+  // --- Autono security: Bridge auth for every panel -> Bridge call (A11) ---
+  // The per-install pairing token is sent as Authorization: Bearer <token> to the configured Bridge / MCP
+  // origins only (never to other hosts); credentialed requests do not follow redirects.
+  const AS = window.AutonoSecurity;
+  let pairingToken = '';
+  try {
+    chrome.storage.local.get('autono_pairing_token', (r) => { pairingToken = (r && r.autono_pairing_token) || ''; });
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'local' && ch.autono_pairing_token) pairingToken = ch.autono_pairing_token.newValue || '';
+    });
+  } catch (_) { /* ignore */ }
+  function isBridgeOrigin(urlStr) {
+    try {
+      const u = new URL(urlStr, location.href);
+      for (const id of ['settingBridgeUrl', 'settingLocalMcpUrl']) {
+        const v = document.getElementById(id)?.value?.trim();
+        const p = v ? AS.parseBridgeUrl(v) : null;
+        if (p && p.ok && p.origin === u.origin) return true;
+      }
+      return u.origin === 'http://127.0.0.1:8765';
+    } catch (_) { return false; }
+  }
+  const fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!isBridgeOrigin(url)) return window.fetch(input, init);
+    const headers = new Headers((init && init.headers) || {});
+    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${pairingToken || 'sk-antigravity'}`);
+    return window.fetch(input, { ...(init || {}), headers, redirect: 'error' });
+  };
+  // --- end ---
+
   // ─── DOM References ─────────────────────────────────────────────────────────
   const modelPickerTrigger = document.getElementById('modelPickerTrigger');
   const selectedModelLabel = document.getElementById('selectedModelLabel');
@@ -111,7 +142,10 @@ marked.setOptions({
   let currentSessionId = generateId();
   let currentTaskId = null;
   let isGenerating = false;
-  const isSearchActive = true; // web search (TinyFish) is always on; there is no switch any more
+  const isSearchActive = true; // search plumbing is present; whether it runs is decided by the opt-in below
+  // Autono security (A22): web search is OFF unless the user turns it on in Settings (and has a TinyFish key)
+  let webSearchEnabled = false;
+  let webSearchThisMessage = true; // per-message gate (kept true; cleared by programmatic sends via opts.noSearch)
   let isCoworkActive = false;
   let attachedImageDataUrl = null;
   let currentStreamingBubble = null;
@@ -150,6 +184,31 @@ marked.setOptions({
     const savedOpenaiKey = localStorage.getItem('antigravity_openai_api_key');
     if (savedOpenaiKey) currentOpenaiApiKey = savedOpenaiKey;
   } catch (_) {}
+  // --- Autono security (A11): API keys live only in chrome.storage.local. Migrate once, delete the copies. ---
+  try {
+    const legacyKeyNames = ['antigravity_gemini_api_key', 'antigravity_anthropic_api_key', 'antigravity_openai_api_key'];
+    const found = {};
+    for (const k of legacyKeyNames) {
+      const v = localStorage.getItem(k);
+      if (v) found[k] = v;
+    }
+    if (Object.keys(found).length > 0) {
+      chrome.storage.local.get(legacyKeyNames, (existing) => {
+        const toSet = {};
+        for (const k of Object.keys(found)) if (!existing || !existing[k]) toSet[k] = found[k];
+        const done = () => { for (const k of legacyKeyNames) { try { localStorage.removeItem(k); } catch (_) {} } };
+        if (Object.keys(toSet).length) chrome.storage.local.set(toSet, done); else done();
+      });
+    }
+    // a copy of the whole settings object (with keys) used to live here too
+    const oldSettings = localStorage.getItem('antigravity_settings');
+    if (oldSettings) {
+      const parsedOld = JSON.parse(oldSettings);
+      for (const k of ['geminiApiKey', 'anthropicApiKey', 'openaiApiKey', 'tinyFishApiKey']) delete parsedOld[k];
+      localStorage.setItem('antigravity_settings', JSON.stringify(parsedOld));
+    }
+  } catch (_) {}
+  // --- end ---
   let customSkills = [];
   try {
     const savedSkills = localStorage.getItem('antigravity_custom_skills');
@@ -168,6 +227,20 @@ marked.setOptions({
       if (Array.isArray(parsedProv)) externalProviders = parsedProv;
     }
   } catch (_) {}
+  // --- Autono security (A11): provider keys only in chrome.storage.local; migrate once, drop the localStorage copy ---
+  try {
+    chrome.storage.local.get('antigravity_external_providers', (r) => {
+      const stored = r && Array.isArray(r.antigravity_external_providers) ? r.antigravity_external_providers : null;
+      if (stored && stored.length) {
+        externalProviders = stored;
+        try { syncExternalProvidersToPicker(); renderExternalProvidersList(); } catch (_) { /* not ready yet */ }
+      } else if (externalProviders.length) {
+        chrome.storage.local.set({ antigravity_external_providers: externalProviders });
+      }
+      try { localStorage.removeItem('antigravity_external_providers'); } catch (_) {}
+    });
+  } catch (_) {}
+  // --- end ---
 
   // Active files in current session (created by model or attached by user)
   const sessionActiveFiles = new Map();
@@ -660,7 +733,7 @@ marked.setOptions({
           promptInput.value = cleanText;
           handleInputStateChange();
           hideAiPromptSuggestions();
-          handleSend();
+          handleSend({ noSearch: true }); // model-authored text: no web search (A18/A22)
         }
       });
       row.appendChild(chip);
@@ -864,6 +937,7 @@ marked.setOptions({
         if (msg.settings) {
           applyLoadedSettings(msg.settings);
         }
+        if (msg.mcpStatus) window.__autonoMcpStatus?.(msg.mcpStatus);
         allSessions = msg.sessions || [];
 
         if (msg.activeSessionId) {
@@ -1208,6 +1282,27 @@ marked.setOptions({
         showLiveActivity('⚡ Task resumed');
         showToast('▶ Session resumed in active tab');
         break;
+
+      // --- Autono security (A10/A20): external control indicator, approvals, settings warnings ---
+      case 'external_action_request':
+        window.__autonoShowExternal?.('request', msg);
+        break;
+
+      case 'external_action':
+        window.__autonoShowExternal?.('action', { summary: `${msg.summary || msg.action} (from ${msg.host || 'external agent'})` });
+        break;
+
+      case 'mcp_bridge_status':
+        window.__autonoMcpStatus?.(msg.status);
+        break;
+
+      case 'settings_warning':
+        (msg.items || []).forEach((it) => {
+          if (it.error) showToast(`Setting ${it.field} rejected (${it.error}). The previous value was kept.`);
+          else if (it.warning) showToast(`Warning: ${it.field} points to ${it.host}, which is not on this computer.`);
+        });
+        break;
+      // --- end ---
 
       case 'user_intervention_received':
         showLiveActivity(`✍ Instruction: "${(msg.text || '').slice(0, 30)}..."`);
@@ -4142,7 +4237,11 @@ marked.setOptions({
   });
 
   // ─── Send / Stop Execution (with TinyFish Web Search & CoT) ─────────────────
-  async function handleSend() {
+  async function handleSend(opts = {}) {
+    // Autono security (A18/A22): programmatic sends (suggestion chips, approval-card answers) carry
+    // model-authored text: they never trigger a web search.
+    const noSearch = !!(opts && opts.noSearch === true);
+    const contextBlocks = []; // sent next to the goal; the background places them in the untrusted block
     const text = promptInput.value.trim();
     if (!text && attachedItems.length === 0) return;
 
@@ -4209,16 +4308,19 @@ marked.setOptions({
 
     // If Search is active, perform TinyFish search!
     // (greetings and slash commands are not worth a web search)
-    if (isSearchActive && text && text.length >= 8 && !text.startsWith('/')) {
-      showLiveActivity('🔍 Buscando en la web con TinyFish AI...');
+    // Autono security (A22): opt-in (setting + per-message switch), needs the user's own TinyFish key,
+    // and only the typed text is sent (no attachments, no selection).
+    const searchThisMessage = webSearchEnabled && webSearchThisMessage && !!tinyFishApiKey && !noSearch;
+    if (searchThisMessage && isSearchActive && text && text.length >= 8 && !text.startsWith('/')) {
+      showLiveActivity('🔍 Searching the web with TinyFish AI...');
       try {
         const searchResp = await searchWithTinyFish(text, {
           apiKey: tinyFishApiKey,
-          purpose: 'Asistencia al usuario y consulta web',
+          purpose: 'User web query',
         });
         if (searchResp && searchResp.results && searchResp.results.length > 0) {
           const searchContext = formatTinyFishForPrompt(searchResp);
-          finalPrompt = `${finalPrompt}\n\n${searchContext}`;
+          contextBlocks.push({ kind: 'search_results', name: 'TinyFish web search', text: searchContext });
 
           lastSearchSources = searchResp.results.map(r => {
             let domain = r.site_name || '';
@@ -4232,7 +4334,7 @@ marked.setOptions({
               url: r.url,
               domain: domain || 'web',
               snippet: r.snippet,
-              favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+              favicon: '', // Autono security (A22): no third-party favicon service; the UI draws a letter avatar
             };
           });
 
@@ -4274,14 +4376,17 @@ marked.setOptions({
           if (!firstImageDataUrl) firstImageDataUrl = item.dataUrl;
           userDisplayList.push(`📷 ${item.name}`);
         } else {
-          fileParts.push(`<nano_file_content type="${item.type || 'file'}" name="${item.name}">\n${item.content}\n</nano_file_content>`);
+          // Autono security (A18): attachments / tabs / fragments / selections are separate context
+          // fields, never concatenated into the goal text.
+          fileParts.push(item.name);
+          contextBlocks.push({
+            kind: item.type === 'tab' ? 'tab' : (item.type === 'fragment' ? 'fragment' : 'attachment'),
+            name: String(item.name || '').slice(0, 120),
+            url: item.url || '',
+            text: String(item.content || ''),
+          });
           userDisplayList.push(`📎 ${item.name}`);
         }
-      }
-
-      if (fileParts.length > 0) {
-        const attachedXml = `\n\n<nano_attached_files>\n${fileParts.join('\n')}\n</nano_attached_files>`;
-        finalPrompt += attachedXml;
       }
 
       const filesHeader = userDisplayList.join('\n');
@@ -4289,11 +4394,11 @@ marked.setOptions({
     }
 
     // Feed active session files context for modifications and file tools
-    if (sessionActiveFiles.size > 0 && !finalPrompt.includes('<active_session_files>')) {
-      const activeFileList = Array.from(sessionActiveFiles.entries()).slice(-6).map(([fname, a]) => {
-        return `<file name="${fname}" version="${a.version}">\n${a.content.slice(0, 3000)}\n</file>`;
-      }).join('\n');
-      finalPrompt += `\n\n<active_session_files>\n${activeFileList}\n</active_session_files>\n[Instrucción de archivos: Puedes crear y modificar archivos PDF, DOCX, HTML, SVG, Markdown y scripts de código. Si el usuario pide modificar un archivo existente, genera la versión actualizada completa usando el bloque con el mismo nombre ej: \`\`\`ext:nombre.ext]`;
+    if (sessionActiveFiles.size > 0) {
+      Array.from(sessionActiveFiles.entries()).slice(-6).forEach(([fname, a]) => {
+        contextBlocks.push({ kind: 'session_file', name: `${fname} (version ${a.version})`, text: String(a.content || '').slice(0, 3000) });
+      });
+      finalPrompt += `\n\n[Instrucción de archivos: Puedes crear y modificar archivos PDF, DOCX, HTML, SVG, Markdown y scripts de código. Si el usuario pide modificar un archivo existente, genera la versión actualizada completa usando el bloque con el mismo nombre ej: \`\`\`ext:nombre.ext]`;
     }
 
     // Create user message row
@@ -4353,6 +4458,7 @@ marked.setOptions({
         thinkingEffort: currentThinkingEffort,
         includeScreenshot: !!screenshotToSend,
         provider: effectiveProvider,
+        contextBlocks,
       });
     } else {
       sendPortMessage({
@@ -4364,6 +4470,7 @@ marked.setOptions({
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
         provider: effectiveProvider,
+        contextBlocks,
       });
     }
 
@@ -4386,7 +4493,37 @@ marked.setOptions({
 
   stopBtn.addEventListener('click', handleStop);
 
+  // --- Autono security (A19): Pause / Resume next to Stop, so the kill switch lives in the side panel ---
+  let panelPauseBtn = null;
+  let panelPaused = false;
+  function ensurePauseBtn() {
+    if (panelPauseBtn || !stopBtn || !stopBtn.parentElement) return panelPauseBtn;
+    panelPauseBtn = document.createElement('button');
+    panelPauseBtn.type = 'button';
+    panelPauseBtn.className = stopBtn.className;
+    panelPauseBtn.classList.add('hidden');
+    panelPauseBtn.title = 'Pause task';
+    panelPauseBtn.textContent = '❚❚';
+    panelPauseBtn.addEventListener('click', () => {
+      if (!isGenerating) return;
+      panelPaused = !panelPaused;
+      sendPortMessage({ type: panelPaused ? 'pause_cowork_task' : 'resume_cowork_task', reason: 'user_panel' });
+      panelPauseBtn.title = panelPaused ? 'Resume task' : 'Pause task';
+      panelPauseBtn.textContent = panelPaused ? '▶' : '❚❚';
+    });
+    stopBtn.parentElement.insertBefore(panelPauseBtn, stopBtn);
+    return panelPauseBtn;
+  }
+  // --- end ---
+
   function toggleInputState(generating) {
+    {
+      const pb = ensurePauseBtn();
+      if (pb) {
+        pb.classList.toggle('hidden', !(generating && isCoworkActive));
+        if (!generating) { panelPaused = false; pb.title = 'Pause task'; pb.textContent = '❚❚'; }
+      }
+    }
     if (generating) {
       stopBtn.classList.remove('hidden');
       sendBtn.classList.remove('hidden');
@@ -5596,22 +5733,120 @@ marked.setOptions({
   }
 
   if (settingLocalMcpBridgeEnabled) {
-    settingLocalMcpBridgeEnabled.addEventListener('change', () => {
-      const isEnabled = settingLocalMcpBridgeEnabled.checked;
-      localStorage.setItem('autono_local_mcp_bridge_enabled', String(isEnabled));
-      chrome.storage.local.set({ autono_local_mcp_bridge_enabled: isEnabled });
-      updateLocalMcpStatusUI(isEnabled);
-
-      // Save into settings object as well
-      const saved = JSON.parse(localStorage.getItem('antigravity_settings') || '{}');
-      saved.localMcpBridgeEnabled = isEnabled;
-      saved.localMcpUrl = getFullMcpSseUrl();
-      localStorage.setItem('antigravity_settings', JSON.stringify(saved));
-      sendPortMessage({ type: 'save_settings', settings: saved });
-
-      showToast(isEnabled ? 'Servidor MCP para agentes locales activado' : 'Servidor MCP desactivado');
+    // --- Autono security (A10): explicit toggle -> 'mcp_bridge_set' port message (no storage event) ---
+    settingLocalMcpBridgeEnabled.addEventListener('change', async () => {
+      const wantEnabled = settingLocalMcpBridgeEnabled.checked;
+      if (!wantEnabled) {
+        sendPortMessage({ type: 'mcp_bridge_set', enabled: false });
+        updateLocalMcpStatusUI(false);
+        showToast('Servidor MCP desactivado');
+        return;
+      }
+      const urlCheck = AS.parseBridgeUrl(getFullMcpSseUrl());
+      if (!urlCheck.ok) {
+        settingLocalMcpBridgeEnabled.checked = false;
+        showToast('MCP URL rejected: use http://127.0.0.1:<port>/mcp/sse (https for a remote host, no credentials).');
+        return;
+      }
+      let confirmHost = null;
+      if (!urlCheck.loopback) {
+        const okRemote = window.confirm(`Allow ${urlCheck.host} to control your browser?\n\nThis host is not on this computer. Only continue if you own it and it is reachable over https.`);
+        if (!okRemote) {
+          settingLocalMcpBridgeEnabled.checked = false;
+          return;
+        }
+        confirmHost = urlCheck.host;
+      }
+      // generate the per-install pairing token the first time; it is shown once
+      const existing = await new Promise((r) => chrome.storage.local.get('autono_pairing_token', (v) => r((v && v.autono_pairing_token) || '')));
+      if (!existing) generateAndShowPairingToken();
+      sendPortMessage({ type: 'mcp_bridge_set', enabled: true, confirmHost });
+      updateLocalMcpStatusUI(true);
+      showToast('Servidor MCP para agentes locales activado');
     });
   }
+
+  function generateAndShowPairingToken() {
+    const token = AS.generatePairingToken();
+    chrome.storage.local.set({ autono_pairing_token: token });
+    pairingToken = token;
+    const box = document.getElementById('mcpPairingTokenDisplay');
+    const note = document.getElementById('mcpPairingTokenNote');
+    if (box) { box.value = token; }
+    if (note) note.textContent = 'Copy this token into the Bridge now: it will not be shown again. Bridge calls from this extension carry it as Authorization: Bearer <token>; external-control calls carry X-Autono-Token.';
+    // hide it again after the user had time to copy it (it stays stored, not displayed)
+    setTimeout(() => {
+      if (box && box.value === token) { box.value = ''; box.placeholder = 'Token set (hidden). Regenerate to see a new one.'; }
+      if (note) note.textContent = 'The token is shown once, when generated. Copy it into the Bridge configuration.';
+    }, 120000);
+  }
+  document.getElementById('mcpPairingTokenBtn')?.addEventListener('click', () => {
+    if (!window.confirm('Generate a new pairing token? The Bridge must be updated with it, otherwise it will stop working.')) return;
+    generateAndShowPairingToken();
+    showToast('New pairing token generated');
+  });
+  // --- end ---
+
+  // --- Autono security (A10): in-panel indicator + approval bar for external actions ---
+  (function externalControlUi() {
+    const bar = document.createElement('div');
+    bar.id = 'autonoExternalBar';
+    bar.setAttribute('role', 'status');
+    bar.style.cssText = 'display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;padding:8px 10px;border-radius:8px;background:#7c2d12;color:#fff;font-size:12px;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    const text = document.createElement('div');
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:none;gap:8px;margin-top:6px';
+    const allowBtn = document.createElement('button');
+    allowBtn.type = 'button'; allowBtn.textContent = 'Allow once';
+    const denyBtn = document.createElement('button');
+    denyBtn.type = 'button'; denyBtn.textContent = 'Deny';
+    for (const b of [allowBtn, denyBtn]) b.style.cssText = 'padding:3px 10px;border-radius:6px;border:0;cursor:pointer;font-size:12px';
+    actions.append(allowBtn, denyBtn);
+    bar.append(text, actions);
+    document.body.appendChild(bar);
+    let pendingId = null;
+    let hideTimer = null;
+    const answer = (allow) => {
+      if (pendingId) sendPortMessage({ type: 'external_action_response', requestId: pendingId, allow });
+      pendingId = null;
+      actions.style.display = 'none';
+      bar.style.display = 'none';
+    };
+    allowBtn.addEventListener('click', () => answer(true));
+    denyBtn.addEventListener('click', () => answer(false));
+    window.__autonoShowExternal = (kind, msg) => {
+      clearTimeout(hideTimer);
+      if (kind === 'request') {
+        pendingId = msg.requestId;
+        text.textContent = `External agent asks to: ${msg.summary}`;
+        actions.style.display = 'flex';
+        bar.style.display = 'block';
+      } else {
+        text.textContent = `External control: ${msg.summary}`;
+        actions.style.display = pendingId ? 'flex' : 'none';
+        bar.style.display = 'block';
+        if (!pendingId) hideTimer = setTimeout(() => { bar.style.display = 'none'; }, 8000);
+      }
+    };
+    window.__autonoMcpStatus = (st) => {
+      const line = document.getElementById('mcpStatusLine');
+      if (!line || !st) return;
+      const reasons = {
+        too_many_failures: 'Stopped after 10 consecutive failures. Toggle it off and on to retry.',
+        unauthorized: 'Stopped: the Bridge rejected the pairing token.',
+        invalid_url: 'Blocked: the MCP URL is not valid.',
+        host_not_confirmed: 'Blocked: this non-loopback host was not confirmed.',
+        no_pairing_token: 'Blocked: no pairing token yet. Generate one.',
+      };
+      const label = st.state === 'running' ? `Running (${st.host})` : (st.state === 'off' ? 'Off' : (reasons[st.reason] || st.state));
+      line.textContent = `External control: ${label}`;
+      if ((st.state === 'stopped' || st.state === 'blocked') && settingLocalMcpBridgeEnabled) {
+        settingLocalMcpBridgeEnabled.checked = false;
+        showToast(reasons[st.reason] || 'External control stopped');
+      }
+    };
+  })();
+  // --- end ---
 
   if (copyMcpUrlBtn) {
     copyMcpUrlBtn.addEventListener('click', async () => {
@@ -5655,7 +5890,6 @@ marked.setOptions({
   // ─── External Providers Management (Up to 5 third-party providers) ─────────
   function saveExternalProvidersToStorage() {
     try {
-      localStorage.setItem('antigravity_external_providers', JSON.stringify(externalProviders));
       chrome.storage.local.set({ antigravity_external_providers: externalProviders });
     } catch (_) {}
     syncExternalProvidersToPicker();
@@ -5890,7 +6124,7 @@ marked.setOptions({
 
       const name = (nameInput?.value || '').trim();
       let provId = (idInput?.value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      const baseUrl = (baseUrlInput?.value || '').trim().replace(/\/+$/, '');
+      let baseUrl = (baseUrlInput?.value || '').trim().replace(/\/+$/, '');
       const apiKey = (apiKeyInput?.value || '').trim();
       const iconUrl = (extProvIconUrl?.value || '').trim();
 
@@ -5902,6 +6136,14 @@ marked.setOptions({
         showToast('Please specify a Base URL');
         return;
       }
+      // Autono security (A20): https (or loopback http), no embedded credentials
+      const provUrlCheck = AS.parseBridgeUrl(baseUrl);
+      if (!provUrlCheck.ok) {
+        showToast(provUrlCheck.error === 'insecure_http' ? 'Base URL must use https (http is only allowed for localhost).' : 'Base URL is not valid (no credentials, http/https only).');
+        return;
+      }
+      baseUrl = provUrlCheck.url;
+      if (provUrlCheck.warning) showToast(`Warning: ${provUrlCheck.host} is not on this computer; your prompts and key will be sent there.`);
       if (!provId) {
         provId = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
       }
@@ -6100,6 +6342,14 @@ marked.setOptions({
     if (mascotInput) mascotInput.checked = s.mascot !== false;
     const agentConfirmInput = document.getElementById('settingAgentConfirm');
     if (agentConfirmInput) agentConfirmInput.checked = s.agentConfirm !== false;
+    // Autono security: opt-in switches (default off)
+    webSearchEnabled = s.webSearchEnabled === true;
+    const webSearchInput = document.getElementById('settingWebSearchEnabled');
+    if (webSearchInput) webSearchInput.checked = webSearchEnabled;
+    const fwdKeysInput = document.getElementById('settingForwardKeysToBridge');
+    if (fwdKeysInput) fwdKeysInput.checked = s.forwardKeysToBridge === true;
+    const autoExtInput = document.getElementById('settingAutoAllowExternalActions');
+    if (autoExtInput) autoExtInput.checked = s.autoAllowExternalActions === true;
 
     const tabLockedSidebarInput = document.getElementById('settingTabLockedSidebar');
     if (tabLockedSidebarInput && s.tabLockedSidebar !== undefined) tabLockedSidebarInput.checked = Boolean(s.tabLockedSidebar);
@@ -6612,16 +6862,27 @@ marked.setOptions({
     currentOpenaiApiKey = openaiApiKeyVal || '';
 
     try {
+      // Autono security (A11): modes only; API keys are no longer duplicated in localStorage
       localStorage.setItem('antigravity_antigravity_mode', currentAntigravityMode);
-      localStorage.setItem('antigravity_gemini_api_key', currentGeminiApiKey);
       localStorage.setItem('antigravity_claude_mode', currentClaudeMode);
-      localStorage.setItem('antigravity_anthropic_api_key', currentAnthropicApiKey);
       localStorage.setItem('antigravity_openai_mode', currentOpenaiMode);
-      localStorage.setItem('antigravity_openai_api_key', currentOpenaiApiKey);
     } catch (_) {}
 
+    // Autono security (A20): Bridge URL must be http(s), http only on loopback, no credentials
+    const bridgeUrlCheck = AS.parseBridgeUrl(settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765');
+    if (!bridgeUrlCheck.ok) {
+      showToast(bridgeUrlCheck.error === 'insecure_http'
+        ? 'Bridge URL rejected: http is only allowed for 127.0.0.1 / localhost. Use https for a remote Bridge.'
+        : 'Bridge URL rejected: it must be a plain http(s) address without credentials.');
+      return;
+    }
+    if (bridgeUrlCheck.warning) {
+      showToast(`Warning: the Bridge at ${bridgeUrlCheck.host} is not on this computer. Prompts, page content and screenshots will be sent there.`);
+    }
+    if (settingBridgeUrl) settingBridgeUrl.value = bridgeUrlCheck.url;
+
     const newSettings = {
-      bridgeUrl: settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765',
+      bridgeUrl: bridgeUrlCheck.url,
       selectedModel: settingDefaultModel?.value || currentModel,
       maxSteps: parseInt(settingMaxSteps?.value, 10) || 30,
       tinyFishApiKey: settingTinyFishKey ? settingTinyFishKey.value.trim() : '',
@@ -6646,10 +6907,13 @@ marked.setOptions({
       chatFontSize: document.getElementById('settingChatFontSize')?.value || '14px',
       chatSpacing: document.getElementById('settingChatSpacing')?.value || 'comfortable',
       colorTheme: localStorage.getItem('antigravity_theme') || 'cyan',
-      shadowEnabled: document.getElementById('settingShadowEnabled')?.checked ?? true,
+      shadowEnabled: document.getElementById('settingShadowEnabled')?.checked ?? false,
       shadowPreventSleep: document.getElementById('settingShadowPreventSleep')?.checked ?? true,
       shadowAutoWake: document.getElementById('settingShadowAutoWake')?.checked ?? true,
-      shadowOnComplete: document.getElementById('settingShadowOnComplete')?.value || 'sleep',
+      shadowOnComplete: document.getElementById('settingShadowOnComplete')?.value || 'none',
+      webSearchEnabled: document.getElementById('settingWebSearchEnabled')?.checked ?? false,
+      forwardKeysToBridge: document.getElementById('settingForwardKeysToBridge')?.checked ?? false,
+      autoAllowExternalActions: document.getElementById('settingAutoAllowExternalActions')?.checked ?? false,
       tabGrouping: document.getElementById('settingTabGrouping')?.checked ?? true,
       workingOverlay: document.getElementById('settingWorkingOverlay')?.checked ?? true,
       multiAgent: document.getElementById('settingMultiAgent')?.checked ?? false,
@@ -6677,29 +6941,36 @@ marked.setOptions({
     }
 
     try {
-      localStorage.setItem('antigravity_settings', JSON.stringify(newSettings));
+      // Autono security (A11): the localStorage copy never holds secrets
+      const publicCopy = { ...newSettings };
+      for (const k of ['geminiApiKey', 'anthropicApiKey', 'openaiApiKey', 'tinyFishApiKey']) delete publicCopy[k];
+      localStorage.setItem('antigravity_settings', JSON.stringify(publicCopy));
     } catch (_) {}
 
-    localStorage.setItem('autono_local_mcp_bridge_enabled', String(newSettings.localMcpBridgeEnabled));
     localStorage.setItem('autono_local_mcp_url', newSettings.localMcpUrl);
     chrome.storage.local.set({ autono_local_mcp_url: newSettings.localMcpUrl });
     updateLocalMcpStatusUI(newSettings.localMcpBridgeEnabled);
     refreshMcpSnippet();
 
+    // the background keeps the remote-control toggle as it is: it changes only via 'mcp_bridge_set'
     sendPortMessage({ type: 'save_settings', settings: newSettings });
 
+    // Autono security (A11): provider keys go to the Bridge only if the user opted in
     const bridgeUrl = (newSettings.bridgeUrl || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+    const configBody = {
+      antigravity_mode: currentAntigravityMode,
+      claude_mode: currentClaudeMode,
+      openai_mode: currentOpenaiMode,
+    };
+    if (newSettings.forwardKeysToBridge) {
+      configBody.gemini_api_key = currentGeminiApiKey;
+      configBody.anthropic_api_key = currentAnthropicApiKey;
+      configBody.openai_api_key = currentOpenaiApiKey;
+    }
     fetch(`${bridgeUrl}/api/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        antigravity_mode: currentAntigravityMode,
-        gemini_api_key: currentGeminiApiKey,
-        claude_mode: currentClaudeMode,
-        anthropic_api_key: currentAnthropicApiKey,
-        openai_mode: currentOpenaiMode,
-        openai_api_key: currentOpenaiApiKey,
-      }),
+      body: JSON.stringify(configBody),
     }).catch(() => null);
     applyKeepAwake(newSettings.shadowPreventSleep);
     selectModel(newSettings.selectedModel);
@@ -8166,7 +8437,7 @@ You are a world-class principal software engineer.
     if (!text || isGenerating) return;
     promptInput.value = text;
     handleInputStateChange();
-    handleSend();
+    handleSend({ noSearch: true }); // approval-card answers / cowork_request goals are model-authored (A18/A22)
   }
 
   function triggerCoworkExecution(goalText) {
@@ -8881,7 +9152,7 @@ You are a world-class principal software engineer.
               title,
               url,
               domain,
-              favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+              favicon: '', // Autono security (A22): no favicon service
             });
           } catch (e) {}
         }
@@ -9040,10 +9311,12 @@ You are a world-class principal software engineer.
       sourcesBtn.type = 'button';
       sourcesBtn.className = 'streaming-sources-trigger';
 
-      const favs = finalSources.slice(0, 3).map((s) => {
-        const fav = s.favicon || (s.url ? `https://www.google.com/s2/favicons?domain=${new URL(s.url).hostname}&sz=32` : '');
-        return fav ? `<img src="${fav}" alt="" class="citation-fav-img">` : '<span class="fav-placeholder"></span>';
-      }).join('');
+      // Autono security (A22): letter avatar, no <img> and no request to a favicon service
+      const avatarLetter = (s) => {
+        const t = String(s.domain || s.title || s.url || '?').replace(/^https?:\/\/(www\.)?/, '');
+        return escapeHtml((t.charAt(0) || '?').toUpperCase());
+      };
+      const favs = finalSources.slice(0, 3).map((s) => `<span class="fav-placeholder">${avatarLetter(s)}</span>`).join('');
 
       sourcesBtn.innerHTML = `
         <span class="citation-favicons">${favs}</span>
@@ -9057,10 +9330,9 @@ You are a world-class principal software engineer.
       drawer.className = 'streaming-sources-drawer hidden';
       drawer.innerHTML = finalSources.map((s) => {
         const domain = s.domain || (s.url ? new URL(s.url).hostname.replace(/^www\./, '') : 'web');
-        const fav = s.favicon || (s.url ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : '');
         return `
           <a href="${escapeHtml(s.url || '#')}" target="_blank" rel="noopener noreferrer" class="citation-card">
-            ${fav ? `<img src="${fav}" alt="" class="citation-card-fav">` : ''}
+            <span class="fav-placeholder">${avatarLetter(s)}</span>
             <div class="citation-card-info">
               <div class="citation-card-title">${escapeHtml(s.title || domain)}</div>
               <div class="citation-card-domain">${escapeHtml(domain)}</div>

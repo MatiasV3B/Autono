@@ -4001,6 +4001,14 @@ let mcpStatus = { state: 'off', reason: '', host: '', lastAction: null }; // sho
 
 function setMcpStatus(patch) {
   mcpStatus = { ...mcpStatus, ...patch };
+  if (mcpStatus.state === 'stopped' || mcpStatus.state === 'blocked') {
+    // never come back by itself after a cutoff: the user turns it on again
+    chrome.storage.local.get('antigravity_settings').then((d) => {
+      const s = d.antigravity_settings || {};
+      s.localMcpBridgeEnabled = false;
+      return chrome.storage.local.set({ antigravity_settings: s, autono_local_mcp_bridge_enabled: false });
+    }).catch(() => null);
+  }
   broadcastMessage({ type: 'mcp_bridge_status', status: mcpStatus });
 }
 
