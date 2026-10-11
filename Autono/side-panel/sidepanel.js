@@ -6807,7 +6807,7 @@ marked.setOptions({
     renderPricingSettings();
     piperRefresh();
     renderWhisperSettings();
-    checkForUpdates({ force: false });
+    if (updateCheckDue()) checkForUpdates({ force: false }); // Autono security (A21)
     syncUserPrefs();
   });
 
@@ -8022,7 +8022,7 @@ You are a world-class principal software engineer.
     const { bridge, extension } = updateState;
     const version = chrome.runtime.getManifest().version;
     const parts = [
-      `Autono ${version}: ${extension?.error ? extension.error : extension?.update_available ? 'a new version is available' : 'up to date'}`,
+      `Autono ${version}${extension?.current ? ` (commit ${shortSha(extension.current)})` : ''}: ${extension?.error ? extension.error : extension?.update_available ? `a new version is available (commit ${shortSha(extension.latest)}). Updating REPLACES this extension with the latest code from GitHub.` : 'up to date'}`,
       `Bridge: ${bridge?.error ? bridge.error : bridge?.update_available ? 'a new version is available' : 'up to date'}`,
     ];
     const pending = Boolean(extension?.update_available || bridge?.update_available);
@@ -8041,9 +8041,29 @@ You are a world-class principal software engineer.
     banner?.classList.toggle('hidden', !(pending && dismissed !== key) && !updateBusy);
   }
 
+  // --- Autono security (A21): store builds update through the store; the self-updater is hidden there ---
+  const STORE_MANAGED_UPDATES = Boolean(chrome.runtime.getManifest().update_url);
+  const UPDATE_LAST_CHECK_KEY = 'autono_last_update_check';
+  if (STORE_MANAGED_UPDATES) {
+    for (const id of ['updateBanner', 'updateApplyBtn', 'updateCheckBtn', 'updatePathInput', 'updateStatusLines', 'updateProgress']) {
+      const el = document.getElementById(id);
+      if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
+    }
+  }
+  // at most one automatic check per 24 h; a click on "Check" always checks
+  function updateCheckDue() {
+    try {
+      const last = Number(localStorage.getItem(UPDATE_LAST_CHECK_KEY) || 0);
+      return !last || Date.now() - last > 24 * 60 * 60 * 1000;
+    } catch (_) { return false; }
+  }
+  // --- end ---
+
   async function checkForUpdates({ force = false, silent = false } = {}) {
     const line = document.getElementById('updateStatusLines');
+    if (STORE_MANAGED_UPDATES) return;
     if (updateBusy) return;
+    try { localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(Date.now())); } catch (_) { /* ignore */ }
     if (!silent && line) { line.textContent = 'Checking…'; line.className = 'piper-status'; }
     try {
       const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
@@ -8114,6 +8134,19 @@ You are a world-class principal software engineer.
     if (updateBusy || !updateState) return;
     const doExt = Boolean(updateState.extension?.update_available);
     const doBridge = Boolean(updateState.bridge?.update_available);
+    // --- Autono security (A21): explicit confirmation, with version / commit and what it means ---
+    if (doExt || doBridge) {
+      const cur = chrome.runtime.getManifest().version;
+      const what = [];
+      if (doExt) what.push(`Autono ${cur} -> commit ${shortSha(updateState.extension?.latest)}`);
+      if (doBridge) what.push(`Bridge -> commit ${shortSha(updateState.bridge?.latest)}`);
+      const okUpdate = window.confirm(
+        `Update now?\n\n${what.join('\n')}\n\nThis downloads the latest code from GitHub and REPLACES the installed extension` +
+        `${doBridge ? ' and Bridge' : ''} with it. The code is not signature-checked by the extension. Only continue if you trust the source.`
+      );
+      if (!okUpdate) return;
+    }
+    // --- end ---
     updateBusy = true;
     document.getElementById('updateBanner')?.classList.remove('hidden');
     const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
@@ -8172,7 +8205,8 @@ You are a world-class principal software engineer.
     }
     chrome.storage.local.remove('autono_just_updated');
   });
-  setTimeout(() => checkForUpdates({ force: true, silent: true }), 2500);
+  // Autono security (A21): no forced check on every panel open; at most one quiet check per 24 h
+  if (updateCheckDue()) setTimeout(() => checkForUpdates({ force: false, silent: true }), 2500);
 
   function loadPriceOverrides() {
     try {
