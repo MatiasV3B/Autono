@@ -75,21 +75,24 @@ marked.use({
   const sessionsList = document.getElementById('sessionsList');
 
   const settingsModal = document.getElementById('settingsModal');
+  // Settings controls are always looked up INSIDE #settingsModal: markup that ends up elsewhere in the page
+  // (chat messages) can never shadow them by reusing their ids.
+  const settingEl = (id) => settingsModal.querySelector('#' + id);
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-  const settingBridgeUrl = document.getElementById('settingBridgeUrl');
-  const settingDefaultModel = document.getElementById('settingDefaultModel');
-  const settingMaxSteps = document.getElementById('settingMaxSteps');
-  const settingMaxOutputTokens = document.getElementById('settingMaxOutputTokens');
-  const settingTinyFishKey = document.getElementById('settingTinyFishKey');
-  const settingDisplayMode = document.getElementById('settingDisplayMode');
-  const settingAntigravityMode = document.getElementById('settingAntigravityMode');
-  const settingGeminiApiKey = document.getElementById('settingGeminiApiKey');
+  const settingBridgeUrl = settingEl('settingBridgeUrl');
+  const settingDefaultModel = settingEl('settingDefaultModel');
+  const settingMaxSteps = settingEl('settingMaxSteps');
+  const settingMaxOutputTokens = settingEl('settingMaxOutputTokens');
+  const settingTinyFishKey = settingEl('settingTinyFishKey');
+  const settingDisplayMode = settingEl('settingDisplayMode');
+  const settingAntigravityMode = settingEl('settingAntigravityMode');
+  const settingGeminiApiKey = settingEl('settingGeminiApiKey');
   const toggleGeminiKeyVisibility = document.getElementById('toggleGeminiKeyVisibility');
-  const settingClaudeMode = document.getElementById('settingClaudeMode');
-  const settingAnthropicApiKey = document.getElementById('settingAnthropicApiKey');
+  const settingClaudeMode = settingEl('settingClaudeMode');
+  const settingAnthropicApiKey = settingEl('settingAnthropicApiKey');
   const toggleAnthropicKeyVisibility = document.getElementById('toggleAnthropicKeyVisibility');
-  const settingOpenaiMode = document.getElementById('settingOpenaiMode');
-  const settingOpenaiApiKey = document.getElementById('settingOpenaiApiKey');
+  const settingOpenaiMode = settingEl('settingOpenaiMode');
+  const settingOpenaiApiKey = settingEl('settingOpenaiApiKey');
   const toggleOpenaiKeyVisibility = document.getElementById('toggleOpenaiKeyVisibility');
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 
@@ -3368,7 +3371,7 @@ marked.use({
   function dictationLanguage() {
     const saved = localStorage.getItem(DICT_LANG_KEY);
     if (saved === 'en' || saved === 'es' || saved === 'auto') return saved;
-    const response = document.getElementById('settingAgentLanguage')?.value;
+    const response = settingEl('settingAgentLanguage')?.value;
     return response === 'en' || response === 'es' ? response : 'auto';
   }
 
@@ -5441,12 +5444,12 @@ marked.use({
   }
 
   // ─── Local Agent MCP Server (Active Browser Bridge) ───────────────────────
-  const settingLocalMcpBridgeEnabled = document.getElementById('settingLocalMcpBridgeEnabled');
+  const settingLocalMcpBridgeEnabled = settingEl('settingLocalMcpBridgeEnabled');
   const localMcpStatusBadge = document.getElementById('localMcpStatusBadge');
   const copyMcpConfigSnippetBtn = document.getElementById('copyMcpConfigSnippetBtn');
   const copyMcpUrlBtn = document.getElementById('copyMcpUrlBtn');
   const mcpConfigSnippetCode = document.getElementById('mcpConfigSnippetCode');
-  const settingLocalMcpUrl = document.getElementById('settingLocalMcpUrl');
+  const settingLocalMcpUrl = settingEl('settingLocalMcpUrl');
   const testMcpUrlBtn = document.getElementById('testMcpUrlBtn');
   const syncMcpWithBridgeBtn = document.getElementById('syncMcpWithBridgeBtn');
 
@@ -5495,7 +5498,7 @@ marked.use({
     localStorage.setItem('autono_local_mcp_url', val);
     chrome.storage.local.set({ autono_local_mcp_url: val });
     refreshMcpSnippet();
-    const isEnabled = document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false;
+    const isEnabled = settingEl('settingLocalMcpBridgeEnabled')?.checked ?? false;
     updateLocalMcpStatusUI(isEnabled);
 
     if (notifySave) {
@@ -5516,7 +5519,7 @@ marked.use({
     btn.addEventListener('click', () => {
       const targetPort = btn.getAttribute('data-port');
       if (!targetPort) return;
-      const targetInput = document.getElementById('settingLocalMcpUrl');
+      const targetInput = settingEl('settingLocalMcpUrl');
       if (!targetInput) return;
       try {
         const cur = targetInput.value.trim() || 'http://127.0.0.1:8765/mcp/sse';
@@ -5536,7 +5539,7 @@ marked.use({
   if (syncMcpWithBridgeBtn) {
     syncMcpWithBridgeBtn.addEventListener('click', () => {
       const bridgeBase = getActiveBridgeBaseUrl();
-      const targetInput = document.getElementById('settingLocalMcpUrl');
+      const targetInput = settingEl('settingLocalMcpUrl');
       if (targetInput) {
         targetInput.value = `${bridgeBase}/mcp/sse`;
         onMcpUrlChanged(true);
@@ -6025,43 +6028,43 @@ marked.use({
     if (settingDisplayMode) settingDisplayMode.value = s.displayMode || 'side_panel';
     if (s.selectedModel) selectModel(s.selectedModel);
 
-    const langInput = document.getElementById('settingAgentLanguage');
+    const langInput = settingEl('settingAgentLanguage');
     if (langInput && s.agentLanguage) langInput.value = s.agentLanguage;
 
-    const thinkingInput = document.getElementById('settingDefaultThinking');
+    const thinkingInput = settingEl('settingDefaultThinking');
     if (thinkingInput && s.defaultThinking) thinkingInput.value = s.defaultThinking;
 
-    const sysPromptInput = document.getElementById('settingSystemPrompt');
+    const sysPromptInput = settingEl('settingSystemPrompt');
     if (sysPromptInput && s.systemPrompt) sysPromptInput.value = s.systemPrompt;
 
-    const autonomyInput = document.getElementById('settingAutonomyMode');
+    const autonomyInput = settingEl('settingAutonomyMode');
     if (autonomyInput && s.autonomyMode) autonomyInput.value = s.autonomyMode;
 
-    const visionInput = document.getElementById('settingVisionScreenshots');
+    const visionInput = settingEl('settingVisionScreenshots');
     if (visionInput && s.visionScreenshots !== undefined) visionInput.checked = Boolean(s.visionScreenshots);
 
-    const delayInput = document.getElementById('settingActionDelay');
+    const delayInput = settingEl('settingActionDelay');
     if (delayInput && s.actionDelay) delayInput.value = s.actionDelay;
 
-    const opacityInput = document.getElementById('settingGridOpacity');
+    const opacityInput = settingEl('settingGridOpacity');
     if (opacityInput && s.gridOpacity !== undefined) {
       opacityInput.value = s.gridOpacity;
       currentGridOpacity = parseFloat(s.gridOpacity);
     }
 
-    const squareInput = document.getElementById('settingSquareSize');
+    const squareInput = settingEl('settingSquareSize');
     if (squareInput && s.squareSize) {
       squareInput.value = s.squareSize;
       currentSquareSize = parseInt(s.squareSize, 10);
     }
 
-    const trailInput = document.getElementById('settingTrailDuration');
+    const trailInput = settingEl('settingTrailDuration');
     if (trailInput && s.trailDuration) {
       trailInput.value = s.trailDuration;
       currentTrailDecay = parseFloat(s.trailDuration);
     }
 
-    const soundInput = document.getElementById('settingCompletionSound');
+    const soundInput = settingEl('settingCompletionSound');
     if (soundInput && s.completionSound !== undefined) soundInput.checked = Boolean(s.completionSound);
 
     // Appearance settings restoration
@@ -6071,11 +6074,11 @@ marked.use({
     if (s.colorTheme) applyTheme(s.colorTheme);
 
     // User Profile fields (Synchronized with onboarding localStorage)
-    const userNameInput = document.getElementById('settingUserName');
+    const userNameInput = settingEl('settingUserName');
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
     if (userNameInput) userNameInput.value = s.userName || savedLocalName;
 
-    const userNickInput = document.getElementById('settingUserNickname') || document.getElementById('settingUserNick');
+    const userNickInput = settingEl('settingUserNickname') || settingEl('settingUserNick');
     const savedLocalNick = localStorage.getItem('antigravity_user_nick') || '';
     if (userNickInput) userNickInput.value = s.userNickname || savedLocalNick;
 
@@ -6086,48 +6089,48 @@ marked.use({
     }
 
     // Shadow Mode settings restoration
-    const shadowEnabledInput = document.getElementById('settingShadowEnabled');
+    const shadowEnabledInput = settingEl('settingShadowEnabled');
     if (shadowEnabledInput && s.shadowEnabled !== undefined) shadowEnabledInput.checked = Boolean(s.shadowEnabled);
 
-    const shadowPreventSleepInput = document.getElementById('settingShadowPreventSleep');
+    const shadowPreventSleepInput = settingEl('settingShadowPreventSleep');
     if (shadowPreventSleepInput && s.shadowPreventSleep !== undefined) {
       shadowPreventSleepInput.checked = Boolean(s.shadowPreventSleep);
       applyKeepAwake(shadowPreventSleepInput.checked);
     }
 
-    const shadowAutoWakeInput = document.getElementById('settingShadowAutoWake');
+    const shadowAutoWakeInput = settingEl('settingShadowAutoWake');
     if (shadowAutoWakeInput && s.shadowAutoWake !== undefined) shadowAutoWakeInput.checked = Boolean(s.shadowAutoWake);
 
-    const shadowOnCompleteInput = document.getElementById('settingShadowOnComplete');
+    const shadowOnCompleteInput = settingEl('settingShadowOnComplete');
     if (shadowOnCompleteInput && s.shadowOnComplete) shadowOnCompleteInput.value = s.shadowOnComplete;
 
     // Customization Mode settings
-    const tabGroupingInput = document.getElementById('settingTabGrouping');
+    const tabGroupingInput = settingEl('settingTabGrouping');
     if (tabGroupingInput && s.tabGrouping !== undefined) tabGroupingInput.checked = Boolean(s.tabGrouping);
 
-    const workingOverlayInput = document.getElementById('settingWorkingOverlay');
+    const workingOverlayInput = settingEl('settingWorkingOverlay');
     if (workingOverlayInput && s.workingOverlay !== undefined) workingOverlayInput.checked = Boolean(s.workingOverlay);
-    const multiAgentInput = document.getElementById('settingMultiAgent');
+    const multiAgentInput = settingEl('settingMultiAgent');
     if (multiAgentInput) multiAgentInput.checked = Boolean(s.multiAgent);
-    const mascotInput = document.getElementById('settingMascot');
+    const mascotInput = settingEl('settingMascot');
     if (mascotInput) mascotInput.checked = s.mascot !== false;
-    const agentConfirmInput = document.getElementById('settingAgentConfirm');
+    const agentConfirmInput = settingEl('settingAgentConfirm');
     if (agentConfirmInput) agentConfirmInput.checked = s.agentConfirm !== false;
 
-    const tabLockedSidebarInput = document.getElementById('settingTabLockedSidebar');
+    const tabLockedSidebarInput = settingEl('settingTabLockedSidebar');
     if (tabLockedSidebarInput && s.tabLockedSidebar !== undefined) tabLockedSidebarInput.checked = Boolean(s.tabLockedSidebar);
 
-    const waitInstantInput = document.getElementById('settingWaitMessageSentOutInstantly');
+    const waitInstantInput = settingEl('settingWaitMessageSentOutInstantly');
     if (waitInstantInput && s.waitMessageSentOutInstantly !== undefined) waitInstantInput.checked = Boolean(s.waitMessageSentOutInstantly);
 
     // Local Agent MCP Server (Active Browser Bridge)
-    const localMcpEnabledInput = document.getElementById('settingLocalMcpBridgeEnabled');
+    const localMcpEnabledInput = settingEl('settingLocalMcpBridgeEnabled');
     const savedLocalMcp = localStorage.getItem('autono_local_mcp_bridge_enabled');
     const isLocalMcpActive = s.localMcpBridgeEnabled !== undefined ? Boolean(s.localMcpBridgeEnabled) : (savedLocalMcp === 'true');
     if (localMcpEnabledInput) {
       localMcpEnabledInput.checked = isLocalMcpActive;
     }
-    const localMcpUrlInput = document.getElementById('settingLocalMcpUrl');
+    const localMcpUrlInput = settingEl('settingLocalMcpUrl');
     const savedLocalMcpUrl = s.localMcpUrl || localStorage.getItem('autono_local_mcp_url');
     if (localMcpUrlInput && savedLocalMcpUrl) {
       localMcpUrlInput.value = savedLocalMcpUrl;
@@ -6361,7 +6364,7 @@ marked.use({
     try {
       localStorage.setItem('antigravity_border_beam', beamStyle || 'dynamic');
     } catch (_) {}
-    const el = document.getElementById('settingBorderBeamGlow');
+    const el = settingEl('settingBorderBeamGlow');
     if (el && el.value !== beamStyle) el.value = beamStyle;
   }
 
@@ -6370,7 +6373,7 @@ marked.use({
     try {
       localStorage.setItem('antigravity_chat_font_size', fontSize || '14px');
     } catch (_) {}
-    const el = document.getElementById('settingChatFontSize');
+    const el = settingEl('settingChatFontSize');
     if (el && el.value !== fontSize) el.value = fontSize;
   }
 
@@ -6379,7 +6382,7 @@ marked.use({
     try {
       localStorage.setItem('antigravity_chat_spacing', spacing || 'comfortable');
     } catch (_) {}
-    const el = document.getElementById('settingChatSpacing');
+    const el = settingEl('settingChatSpacing');
     if (el && el.value !== spacing) el.value = spacing;
   }
 
@@ -6391,17 +6394,17 @@ marked.use({
     });
   });
 
-  const settingBorderBeamGlowEl = document.getElementById('settingBorderBeamGlow');
+  const settingBorderBeamGlowEl = settingEl('settingBorderBeamGlow');
   settingBorderBeamGlowEl?.addEventListener('change', () => {
     applyBorderBeam(settingBorderBeamGlowEl.value);
   });
 
-  const settingChatFontSizeEl = document.getElementById('settingChatFontSize');
+  const settingChatFontSizeEl = settingEl('settingChatFontSize');
   settingChatFontSizeEl?.addEventListener('change', () => {
     applyChatFontSize(settingChatFontSizeEl.value);
   });
 
-  const settingChatSpacingEl = document.getElementById('settingChatSpacing');
+  const settingChatSpacingEl = settingEl('settingChatSpacing');
   settingChatSpacingEl?.addEventListener('change', () => {
     applyChatSpacing(settingChatSpacingEl.value);
   });
@@ -6419,20 +6422,20 @@ marked.use({
   } catch (_) {}
 
   // Realtime Grid Controls Sync
-  const settingGridOpacityEl = document.getElementById('settingGridOpacity');
+  const settingGridOpacityEl = settingEl('settingGridOpacity');
   if (settingGridOpacityEl) {
     settingGridOpacityEl.addEventListener('change', () => {
       currentGridOpacity = parseFloat(settingGridOpacityEl.value);
     });
   }
-  const settingSquareSizeEl = document.getElementById('settingSquareSize');
+  const settingSquareSizeEl = settingEl('settingSquareSize');
   if (settingSquareSizeEl) {
     settingSquareSizeEl.addEventListener('change', () => {
       currentSquareSize = parseInt(settingSquareSizeEl.value, 10);
       initBlueprintCanvas();
     });
   }
-  const settingTrailDurationEl = document.getElementById('settingTrailDuration');
+  const settingTrailDurationEl = settingEl('settingTrailDuration');
   if (settingTrailDurationEl) {
     settingTrailDurationEl.addEventListener('change', () => {
       currentTrailDecay = parseFloat(settingTrailDurationEl.value);
@@ -6518,9 +6521,21 @@ marked.use({
 
   // ─── User Settings → Preferences: the same controls as the other tabs, kept in sync both ways ───
   // (the originals keep working and keep being what Save reads; these just change them)
+  // The mirrored controls are a fixed list (source id -> its "um_" twin), both looked up inside #settingsModal.
+  // Nothing is read from markup attributes at call time, so injected [data-mirror] elements are never touched.
+  const MIRROR_IDS = [
+    'settingAgentLanguage', 'dictationLangSelect', 'settingDefaultModel', 'settingDefaultThinking', 'settingBridgeUrl',
+    'settingTinyFishKey', 'whisperEngineSelect', 'piperAutoRead', 'settingMascot',
+  ];
+  const mirrorPairs = MIRROR_IDS.map((id) => ({
+    id,
+    mirror: settingsModal.querySelector('#um_' + id),
+    src: settingsModal.querySelector('#' + id),
+  }));
+
   function syncUserPrefs() {
-    document.querySelectorAll('[data-mirror]').forEach((mirror) => {
-      const src = document.getElementById(mirror.dataset.mirror);
+    mirrorPairs.forEach(({ mirror, src }) => {
+      if (!mirror) return;
       if (!src) { mirror.closest('.setting-field, .setting-field-toggle')?.classList.add('hidden'); return; }
       if (mirror.tagName === 'SELECT') {
         if (mirror.options.length !== src.options.length || mirror.dataset.sig !== Array.from(src.options).map((o) => o.value).join('|')) {
@@ -6536,9 +6551,8 @@ marked.use({
     });
   }
 
-  document.querySelectorAll('[data-mirror]').forEach((mirror) => {
-    const src = document.getElementById(mirror.dataset.mirror);
-    if (!src) return;
+  mirrorPairs.forEach(({ mirror, src }) => {
+    if (!mirror || !src) return;
     const push = () => {
       if (mirror.type === 'checkbox') src.checked = mirror.checked;
       else src.value = mirror.value;
@@ -6558,8 +6572,8 @@ marked.use({
   settingsBtn.addEventListener('click', () => {
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
     const savedLocalNick = localStorage.getItem('antigravity_user_nick') || '';
-    const nameInp = document.getElementById('settingUserName');
-    const nickInp = document.getElementById('settingUserNickname');
+    const nameInp = settingEl('settingUserName');
+    const nickInp = settingEl('settingUserNickname');
     if (nameInp && !nameInp.value && savedLocalName) nameInp.value = savedLocalName;
     if (nickInp && !nickInp.value && savedLocalNick) nickInp.value = savedLocalNick;
     settingsModal.classList.remove('hidden');
@@ -6575,7 +6589,7 @@ marked.use({
   });
 
   // The mascot switch applies immediately (no need to press Save)
-  document.getElementById('settingMascot')?.addEventListener('change', (e) => {
+  settingEl('settingMascot')?.addEventListener('change', (e) => {
     const on = e.target.checked;
     chrome.storage.local.get(['antigravity_settings'], (res) => {
       const prev = res.antigravity_settings || {};
@@ -6595,9 +6609,9 @@ marked.use({
   });
 
   function saveAllSettings() {
-    const rawSysPrompt = document.getElementById('settingSystemPrompt')?.value || '';
-    const userNick = (document.getElementById('settingUserNickname') || document.getElementById('settingUserNick'))?.value?.trim() || '';
-    const userName = document.getElementById('settingUserName')?.value?.trim() || '';
+    const rawSysPrompt = settingEl('settingSystemPrompt')?.value || '';
+    const userNick = (settingEl('settingUserNickname') || settingEl('settingUserNick'))?.value?.trim() || '';
+    const userName = settingEl('settingUserName')?.value?.trim() || '';
 
     // Guarantee strict subagent prohibition and user name preference
     let enrichedSysPrompt = rawSysPrompt;
@@ -6645,32 +6659,32 @@ marked.use({
       anthropicApiKey: currentAnthropicApiKey,
       openaiMode: currentOpenaiMode,
       openaiApiKey: currentOpenaiApiKey,
-      agentLanguage: document.getElementById('settingAgentLanguage')?.value || 'en',
-      defaultThinking: document.getElementById('settingDefaultThinking')?.value || 'medium',
+      agentLanguage: settingEl('settingAgentLanguage')?.value || 'en',
+      defaultThinking: settingEl('settingDefaultThinking')?.value || 'medium',
       systemPrompt: enrichedSysPrompt,
-      autonomyMode: document.getElementById('settingAutonomyMode')?.value || 'supervised',
-      visionScreenshots: document.getElementById('settingVisionScreenshots')?.checked ?? true,
-      actionDelay: parseInt(document.getElementById('settingActionDelay')?.value || '350', 10),
-      gridOpacity: document.getElementById('settingGridOpacity')?.value || '0.065',
-      squareSize: parseInt(document.getElementById('settingSquareSize')?.value || '44', 10),
-      trailDuration: document.getElementById('settingTrailDuration')?.value || '0.022',
-      completionSound: document.getElementById('settingCompletionSound')?.checked ?? true,
-      borderBeamGlow: document.getElementById('settingBorderBeamGlow')?.value || 'dynamic',
-      chatFontSize: document.getElementById('settingChatFontSize')?.value || '14px',
-      chatSpacing: document.getElementById('settingChatSpacing')?.value || 'comfortable',
+      autonomyMode: settingEl('settingAutonomyMode')?.value || 'supervised',
+      visionScreenshots: settingEl('settingVisionScreenshots')?.checked ?? true,
+      actionDelay: parseInt(settingEl('settingActionDelay')?.value || '350', 10),
+      gridOpacity: settingEl('settingGridOpacity')?.value || '0.065',
+      squareSize: parseInt(settingEl('settingSquareSize')?.value || '44', 10),
+      trailDuration: settingEl('settingTrailDuration')?.value || '0.022',
+      completionSound: settingEl('settingCompletionSound')?.checked ?? true,
+      borderBeamGlow: settingEl('settingBorderBeamGlow')?.value || 'dynamic',
+      chatFontSize: settingEl('settingChatFontSize')?.value || '14px',
+      chatSpacing: settingEl('settingChatSpacing')?.value || 'comfortable',
       colorTheme: localStorage.getItem('antigravity_theme') || 'cyan',
-      shadowEnabled: document.getElementById('settingShadowEnabled')?.checked ?? true,
-      shadowPreventSleep: document.getElementById('settingShadowPreventSleep')?.checked ?? true,
-      shadowAutoWake: document.getElementById('settingShadowAutoWake')?.checked ?? true,
-      shadowOnComplete: document.getElementById('settingShadowOnComplete')?.value || 'sleep',
-      tabGrouping: document.getElementById('settingTabGrouping')?.checked ?? true,
-      workingOverlay: document.getElementById('settingWorkingOverlay')?.checked ?? true,
-      multiAgent: document.getElementById('settingMultiAgent')?.checked ?? false,
-      agentConfirm: document.getElementById('settingAgentConfirm')?.checked ?? true,
-      mascot: document.getElementById('settingMascot')?.checked ?? true,
-      tabLockedSidebar: document.getElementById('settingTabLockedSidebar')?.checked ?? false,
-      waitMessageSentOutInstantly: document.getElementById('settingWaitMessageSentOutInstantly')?.checked ?? true,
-      localMcpBridgeEnabled: document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false,
+      shadowEnabled: settingEl('settingShadowEnabled')?.checked ?? true,
+      shadowPreventSleep: settingEl('settingShadowPreventSleep')?.checked ?? true,
+      shadowAutoWake: settingEl('settingShadowAutoWake')?.checked ?? true,
+      shadowOnComplete: settingEl('settingShadowOnComplete')?.value || 'sleep',
+      tabGrouping: settingEl('settingTabGrouping')?.checked ?? true,
+      workingOverlay: settingEl('settingWorkingOverlay')?.checked ?? true,
+      multiAgent: settingEl('settingMultiAgent')?.checked ?? false,
+      agentConfirm: settingEl('settingAgentConfirm')?.checked ?? true,
+      mascot: settingEl('settingMascot')?.checked ?? true,
+      tabLockedSidebar: settingEl('settingTabLockedSidebar')?.checked ?? false,
+      waitMessageSentOutInstantly: settingEl('settingWaitMessageSentOutInstantly')?.checked ?? true,
+      localMcpBridgeEnabled: settingEl('settingLocalMcpBridgeEnabled')?.checked ?? false,
       localMcpUrl: getFullMcpSseUrl(),
       userName,
       userNickname: userNick,
@@ -6762,7 +6776,7 @@ marked.use({
   const shadowTestWakeBtn = document.getElementById('shadowTestWakeBtn');
   const shadowCancelShutdownBtn = document.getElementById('shadowCancelShutdownBtn');
   const shadowActionFeedback = document.getElementById('shadowActionFeedback');
-  const settingShadowPreventSleep = document.getElementById('settingShadowPreventSleep');
+  const settingShadowPreventSleep = settingEl('settingShadowPreventSleep');
   let shutdownCountdownTimer = null;
 
   function showShadowFeedback(msg, isError = false) {
@@ -7273,16 +7287,16 @@ You are a world-class principal software engineer.
       } catch (_) {}
 
       // Update Settings fields as well
-      const settingName = document.getElementById('settingUserName');
+      const settingName = settingEl('settingUserName');
       if (settingName) settingName.value = name;
-      const settingNick = document.getElementById('settingUserNickname');
+      const settingNick = settingEl('settingUserNickname');
       if (settingNick) settingNick.value = nickname;
       if (settingBridgeUrl) settingBridgeUrl.value = bridgeUrl;
       if (settingTinyFishKey && tinyKey) {
         settingTinyFishKey.value = tinyKey;
         tinyFishApiKey = tinyKey;
       }
-      const langInput = document.getElementById('settingAgentLanguage');
+      const langInput = settingEl('settingAgentLanguage');
       if (langInput) langInput.value = selectedOnboardLang;
 
       // Update header auth button label
@@ -9324,7 +9338,7 @@ You are a world-class principal software engineer.
         const allow = act !== 'deny';
         sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow });
         if (act === 'always') {
-          const input = document.getElementById('settingAgentConfirm');
+          const input = settingEl('settingAgentConfirm');
           if (input) input.checked = false;
           chrome.storage.local.get(['antigravity_settings'], (res) => {
             const prev = res.antigravity_settings || {};
