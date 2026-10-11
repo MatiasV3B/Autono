@@ -1,7 +1,8 @@
 /**
  * Autono mascot (optional add-on).
  * Shows the progress of the running task on whatever tab the user is looking at, announces when it
- * finishes, and lets the user ask a quick side question (/btw) from here without touching the task.
+ * finishes. Clicking it opens the side panel (there is no free-text chat inside the page: any page script
+ * could have driven it). The closed shadow root and the isTrusted checks keep page scripts from pressing it.
  * The background worker decides when to show it and which animation to use (see mascotFromBroadcast).
  */
 (function () {
@@ -110,50 +111,34 @@
     if (host) return;
     host = document.createElement('div');
     host.id = '__autono_mascot_host';
-    const root = host.attachShadow({ mode: 'open' });
+    const root = host.attachShadow({ mode: 'closed' });
     root.innerHTML = `
       <style>${CSS}</style>
       <div class="wrap hidden">
-        <div class="panel hidden">
-          <div class="ph"><span class="ptitle">${T.btwTitle}</span><button type="button" class="pclose" title="${T.close}">✕</button></div>
-          <div class="hint">${T.btwHint}</div>
-          <div class="log"></div>
-          <div class="row"><input type="text" placeholder="${T.placeholder}" autocomplete="off"><button type="button" class="send">${T.send}</button></div>
-        </div>
         <div class="bubble"></div>
         <div class="sprite"><div class="frame"><img alt=""></div><button type="button" class="x" title="${T.close}">✕</button></div>
       </div>`;
     els = {
       wrap: root.querySelector('.wrap'),
-      panel: root.querySelector('.panel'),
       bubble: root.querySelector('.bubble'),
       sprite: root.querySelector('.sprite'),
       frame: root.querySelector('.frame'),
       img: root.querySelector('.frame img'),
-      log: root.querySelector('.log'),
-      input: root.querySelector('.row input'),
-      send: root.querySelector('.send'),
     };
 
     els.sprite.addEventListener('click', (e) => {
+      if (!e.isTrusted) return;
       if (e.target.classList.contains('x')) return;
-      togglePanel();
+      openPanel();
     });
-    els.bubble.addEventListener('click', togglePanel);
+    els.bubble.addEventListener('click', (e) => { if (e.isTrusted) openPanel(); });
     // double click after it has finished: it walks away (the single clicks of the double click cancel out)
     els.sprite.addEventListener('dblclick', (e) => {
+      if (!e.isTrusted) return;
       if (e.target.classList.contains('x')) return;
       if (chatMode()) dismiss();
     });
-    root.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
-    root.querySelector('.pclose').addEventListener('click', () => togglePanel(false));
-    els.send.addEventListener('click', sendBtw);
-    // Keep page shortcuts from reacting to typing in the box
-    ['keydown', 'keyup', 'keypress'].forEach((t) => els.input.addEventListener(t, (e) => e.stopPropagation()));
-    els.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); sendBtw(); }
-      if (e.key === 'Escape') togglePanel(false);
-    });
+    root.querySelector('.x').addEventListener('click', (e) => { if (!e.isTrusted) return; e.stopPropagation(); dismiss(); });
     // pages with a strict image policy can block the GIF: show nothing rather than a broken-image icon
     els.img.addEventListener('error', () => { els.frame.style.visibility = 'hidden'; });
     (document.documentElement || document.body).appendChild(host);
@@ -255,7 +240,6 @@
     clearTimeout(pendingTimer);
     pending = null;
     visible = false;
-    els.panel.classList.add('hidden');
     panelOpen = false;
     els.wrap.classList.add('moving');
     drawSprite('walk');
@@ -332,7 +316,6 @@
       els.wrap.classList.remove('moving');
       els.wrap.style.transform = '';
       els.wrap.style.opacity = '';
-      els.panel.classList.add('hidden');
     }
   }
 
@@ -344,68 +327,14 @@
     else hideNow();
   }
 
-  // Finished (or failed): the box continues the chat. While a task runs it is a side question (/btw).
+  // Finished (or failed): a double click walks it away. The conversation itself happens in the side panel.
   function chatMode() {
     return currentState === 'done' || currentState === 'error';
   }
 
-  function applyPanelMode() {
-    const chat = chatMode();
-    els.panel.querySelector('.ptitle').textContent = chat ? T.chatTitle : T.btwTitle;
-    els.panel.querySelector('.hint').textContent = chat ? T.chatHint : T.btwHint;
-    els.input.placeholder = chat ? T.chatPlaceholder : T.placeholder;
-  }
-
-  function togglePanel(force) {
-    panelOpen = typeof force === 'boolean' ? force : !panelOpen;
-    if (panelOpen) applyPanelMode();
-    els.panel.classList.toggle('hidden', !panelOpen);
-    if (panelOpen) setTimeout(() => els.input.focus(), 30);
-    // an open panel keeps the mascot on screen until it is closed
-    try { chrome.runtime.sendMessage({ type: panelOpen ? 'mascot_pin' : 'mascot_unpin' }); } catch (_) {}
-  }
-
-  function addMsg(who, text) {
-    const div = document.createElement('div');
-    div.className = `msg ${who}`;
-    div.textContent = text;
-    els.log.appendChild(div);
-    els.log.scrollTop = els.log.scrollHeight;
-    return div;
-  }
-
-  function sendBtw() {
-    const text = els.input.value.trim();
-    if (!text || busy) return;
-    busy = true;
-    els.send.disabled = true;
-    els.input.value = '';
-    addMsg('me', text);
-    const pending = addMsg('bot', T.thinking);
-    const shownState = currentState;
-    const asChat = chatMode();
-    clearTimeout(seqTimer);
-    drawSprite('thinking');
-    try {
-      const payload = asChat ? { type: 'mascot_followup', text } : { type: 'mascot_btw', text, history: history.slice(-6) };
-      chrome.runtime.sendMessage(payload, (res) => {
-        busy = false;
-        els.send.disabled = false;
-        const reply = chrome.runtime.lastError ? chrome.runtime.lastError.message : (res && res.success ? res.text : (res && res.error) || 'No answer');
-        pending.textContent = reply || '…';
-        if (res && res.success && !asChat) {
-          history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
-        }
-        els.log.scrollTop = els.log.scrollHeight;
-        // go back to the animation of whatever the task is doing now
-        if (!currentState && shownState) currentState = shownState;
-        replayCurrent();
-      });
-    } catch (err) {
-      busy = false;
-      els.send.disabled = false;
-      pending.textContent = String(err && err.message || err);
-    }
+  // Click on the critter or its bubble: open the side panel (the background keeps the page out of it)
+  function openPanel() {
+    try { chrome.runtime.sendMessage({ type: 'open_side_panel' }); } catch (_) {}
   }
 
   chrome.runtime.onMessage.addListener((msg) => {

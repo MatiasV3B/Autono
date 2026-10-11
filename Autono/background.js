@@ -29,6 +29,11 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
 }
 
+// Keys and history must not be readable/writable from content-script contexts (which run on every page)
+try {
+  chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })?.catch?.(() => null);
+} catch (_) { /* older Chrome */ }
+
 async function getSettings() {
   const data = await chrome.storage.local.get([
     'antigravity_settings',
@@ -85,6 +90,11 @@ async function getExternalProviders() {
     return [];
   }
 }
+
+// --- Autono security: sender validation ---
+const EXT_ORIGIN = new URL(chrome.runtime.getURL('')).origin;
+const isExtPage = (s) => !!s && s.id === chrome.runtime.id && typeof s.url === 'string' && s.url.startsWith(EXT_ORIGIN + '/');
+// --- end ---
 
 function getProviderModes(modelName, settings, endpoint = null) {
   if (endpoint && endpoint.forceLocal) {
@@ -1136,7 +1146,48 @@ getSettings().then((s) => {
   if (s.shadowPreventSleep) applyPowerKeepAwake(true);
 }).catch(() => null);
 
-async function saveSettings(settings) {
+// Only known keys with the right type are stored; URLs must be http(s)
+const SETTINGS_SCHEMA = {
+  bridgeUrl: 'url', localMcpUrl: 'url',
+  selectedModel: 'str', tinyFishApiKey: 'str', displayMode: 'str', antigravityMode: 'str', geminiApiKey: 'str',
+  claudeMode: 'str', anthropicApiKey: 'str', openaiMode: 'str', openaiApiKey: 'str', agentLanguage: 'str',
+  defaultThinking: 'str', systemPrompt: 'longstr', autonomyMode: 'str', gridOpacity: 'str', trailDuration: 'str',
+  borderBeamGlow: 'str', chatFontSize: 'str', chatSpacing: 'str', colorTheme: 'str', shadowOnComplete: 'str',
+  userName: 'str', userNickname: 'str',
+  maxSteps: 'num', maxOutputTokens: 'num', actionDelay: 'num', squareSize: 'num', temperature: 'num',
+  visionScreenshots: 'bool', completionSound: 'bool', shadowEnabled: 'bool', shadowPreventSleep: 'bool',
+  shadowAutoWake: 'bool', tabGrouping: 'bool', workingOverlay: 'bool', multiAgent: 'bool', agentConfirm: 'bool',
+  mascot: 'bool', tabLockedSidebar: 'bool', waitMessageSentOutInstantly: 'bool', localMcpBridgeEnabled: 'bool',
+  autoCaptureScreenshot: 'bool',
+  customSkills: 'array',
+};
+
+function sanitizeSettings(input) {
+  const out = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out;
+  for (const [key, kind] of Object.entries(SETTINGS_SCHEMA)) {
+    const v = input[key];
+    if (v === undefined || v === null) continue;
+    if (kind === 'str' && typeof v === 'string') out[key] = v.slice(0, 2048);
+    else if (kind === 'longstr' && typeof v === 'string') out[key] = v.slice(0, 50000);
+    else if (kind === 'bool' && typeof v === 'boolean') out[key] = v;
+    else if (kind === 'num' && typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+    else if (kind === 'url' && typeof v === 'string') {
+      try {
+        const u = new URL(v.trim());
+        if (u.protocol === 'http:' || u.protocol === 'https:') out[key] = v.trim().slice(0, 2048);
+      } catch (_) { /* invalid URL: dropped, the default is used */ }
+    } else if (kind === 'array' && Array.isArray(v)) {
+      try {
+        if (JSON.stringify(v).length <= 200000) out[key] = v;
+      } catch (_) { /* not serialisable */ }
+    }
+  }
+  return out;
+}
+
+async function saveSettings(rawSettings) {
+  const settings = sanitizeSettings(rawSettings);
   await chrome.storage.local.set({ antigravity_settings: settings });
   await applyDisplayMode(settings.displayMode || 'side_panel');
   if (settings.shadowPreventSleep !== undefined) {
@@ -1338,6 +1389,22 @@ function mascotText() {
   return (mascot.state === 'done' || mascot.state === 'error') ? mascot.note : '';
 }
 
+// The model's note / the error text may only be shown on pages of the same origin as the task tab.
+// Elsewhere '' is sent and the page shows the fixed built-in line for the state ("Finished!").
+async function mascotTextFor(tab) {
+  const text = mascotText();
+  if (!text) return '';
+  try {
+    const taskTabId = mascot.session?.tabId;
+    if (taskTabId == null || !tab?.url) return '';
+    if (taskTabId === tab.id) return text;
+    const taskTab = await chrome.tabs.get(taskTabId);
+    return new URL(taskTab.url).origin === new URL(tab.url).origin ? text : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 function mascotBegin(settings, modelName, explicitProvider, taskText) {
   const wasVisible = mascot.visible;
   clearTimeout(mascot.startTimer);
@@ -1378,7 +1445,7 @@ async function mascotPush(enter) {
   }
   if (show && active?.id) {
     mascot.tabs.add(active.id);
-    await mascotSend(active.id, { type: 'mascot_update', state: mascot.state, enter: !!enter, text: mascotText() });
+    await mascotSend(active.id, { type: 'mascot_update', state: mascot.state, enter: !!enter, text: await mascotTextFor(active) });
   }
 }
 
@@ -4161,6 +4228,11 @@ async function appendMessageToSession(sessionId, message) {
 
 // ─── Port Connection Listener (Side Panel communication) ───────────────────
 chrome.runtime.onConnect.addListener((port) => {
+  // Only the extension's own pages (side panel / popup window) may talk over this port
+  if (port.name !== 'antigravity-panel' || !isExtPage(port.sender)) {
+    try { port.disconnect(); } catch (_) {}
+    return;
+  }
   if (port.name === 'antigravity-panel') {
     activePorts.add(port);
 
@@ -4431,7 +4503,67 @@ async function openOrFocusPopupWindow() {
 }
 
 // ─── Selection Ask, Shortcuts & Fragment Picker Listeners from Web Pages ─────
+// --- bridge relay validator (pure function, unit-tested in tests/security-sanitizer.test.js) ---
+const BRIDGE_RELAY_ROUTES = { '/v1/stt/status': 'GET', '/v1/stt/transcribe': 'POST' };
+const BRIDGE_RELAY_MAX_B64 = 24 * 1024 * 1024;
+function validateBridgeRelay(base, path, method) {
+  if (typeof path !== 'string' || path.length > 64 || !path.startsWith('/')) throw new Error('Not allowed');
+  // no encoded characters, backslashes, dot segments, query or fragment: the exact route or nothing
+  if (/[%\\?#]/.test(path) || path.includes('..') || path.includes('//')) throw new Error('Not allowed');
+  const baseUrl = new URL(base + '/');
+  const url = new URL(path, baseUrl);
+  if (url.origin !== baseUrl.origin || url.search || url.hash) throw new Error('Not allowed');
+  const expected = BRIDGE_RELAY_ROUTES[url.pathname];
+  if (!expected || url.pathname !== path) throw new Error('Not allowed');
+  const wanted = String(method || 'GET').toUpperCase();
+  if (wanted !== expected) throw new Error('Not allowed');
+  return { url: url.href, method: expected };
+}
+// --- end bridge relay validator ---
+
+// Message types a content script (top frame of a tab) may send. Everything else must come from an extension page.
+const CONTENT_SCRIPT_TYPES = new Set([
+  'CHECK_ACTIVE_TASK', 'mascot_ready', 'mascot_dismiss', 'mascot_pin', 'mascot_unpin',
+  'open_side_panel', 'close_side_panel',
+  'cancel_task', 'AGENT_WORK_PAUSED', // overlay buttons: only from the tab the task runs in (checked below)
+  'antigravity_picked_fragment', 'zylo_picked_fragment', 'antigravity_picker_cancelled', 'zylo_picker_cancelled',
+]);
+const PICKER_TYPES = new Set(['antigravity_picked_fragment', 'zylo_picked_fragment', 'antigravity_picker_cancelled', 'zylo_picker_cancelled']);
+// Tabs the side panel armed the element picker on (tabId -> expiry). A pick from any other tab is ignored.
+const pickerArmedTabs = new Map();
+const PICKER_ARM_MS = 10 * 60 * 1000;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const msgType = message?.type;
+  const fromExtPage = isExtPage(sender);
+  if (!fromExtPage) {
+    // Not one of our own pages: only the small content-script allowlist, top frame of a tab only
+    const allowed = !!sender.tab && sender.frameId === 0 && sender.id === chrome.runtime.id && CONTENT_SCRIPT_TYPES.has(msgType);
+    if (!allowed) {
+      // user_intervention / resume_cowork_task / paused:false and every other type end here
+      sendResponse?.({ success: false, paused: false, error: 'Not allowed' });
+      return false;
+    }
+    if (msgType === 'cancel_task' || msgType === 'AGENT_WORK_PAUSED') {
+      const ownTask = runningTask && runningTask.tabId === sender.tab.id;
+      if (!ownTask || (msgType === 'AGENT_WORK_PAUSED' && message.paused !== true)) {
+        sendResponse?.({ success: false, paused: false, error: 'Not allowed' });
+        return false;
+      }
+    }
+    if (PICKER_TYPES.has(msgType)) {
+      const until = pickerArmedTabs.get(sender.tab.id);
+      pickerArmedTabs.delete(sender.tab.id);
+      if (!until || until < Date.now()) return false;
+    }
+  }
+
+  if (msgType === 'antigravity_picker_armed' && Number.isInteger(message.tabId)) {
+    pickerArmedTabs.set(message.tabId, Date.now() + PICKER_ARM_MS);
+    sendResponse?.({ success: true });
+    return true;
+  }
+
   if (message?.type === 'quick_inference') {
     (async () => {
       try {
@@ -4464,9 +4596,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'mascot_ready') {
-    const shown = mascot.eligible && !mascot.dismissed && mascot.visible && mascot.state;
-    sendResponse?.({ state: shown ? mascot.state : null, text: shown ? mascotText() : '' });
-    if (shown && sender.tab?.id) mascot.tabs.add(sender.tab.id);
+    // Only a tab the background already pushed the mascot to gets the state back (no probing from other pages)
+    const tabId = sender.tab?.id;
+    const shown = mascot.eligible && !mascot.dismissed && mascot.visible && mascot.state && mascot.tabs.has(tabId);
+    (async () => {
+      const text = shown ? await mascotTextFor(sender.tab) : '';
+      sendResponse?.({ state: shown ? mascot.state : null, text });
+    })();
     return true;
   }
 
@@ -4494,29 +4630,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'bridge_relay') {
     (async () => {
       try {
-        const path = String(message.path || '');
-        if (!path.startsWith('/v1/stt/')) throw new Error('Not allowed');
         const settings = await getSettings();
         const base = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '').replace(/\/v1$/, '');
-        const init = { method: message.method || 'GET', signal: AbortSignal.timeout(60000) };
-        if (message.contentType) init.headers = { 'Content-Type': message.contentType };
+        const target = validateBridgeRelay(base, message.path, message.method);
+        const init = { method: target.method, signal: AbortSignal.timeout(60000) };
+        if (message.contentType) init.headers = { 'Content-Type': String(message.contentType).slice(0, 100) };
         if (message.bodyB64) {
+          if (target.method !== 'POST' || String(message.bodyB64).length > BRIDGE_RELAY_MAX_B64) throw new Error('Not allowed');
           const binary = atob(message.bodyB64);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
           init.body = bytes;
         }
-        const res = await fetch(base + path, init);
+        const res = await fetch(target.url, init);
         sendResponse({ ok: res.ok, status: res.status, text: await res.text() });
       } catch (err) {
         sendResponse({ ok: false, status: 0, text: '', error: err.message || String(err) });
       }
     })();
-    return true;
-  }
-
-  if (message?.type === 'mascot_summon') {
-    mascotSummon().then((ok) => sendResponse?.({ success: ok })).catch(() => sendResponse?.({ success: false }));
     return true;
   }
 
@@ -4532,86 +4663,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // A normal chat message written to the mascot once the task has finished: it continues the same chat
-  if (message?.type === 'mascot_followup') {
-    (async () => {
-      try {
-        if (runningTask && runningTask.status === 'running') {
-          sendResponse?.({ success: false, error: 'Still working on the last request.' });
-          return;
-        }
-        const settings = await getSettings();
-        const session = mascot.session || { sessionId: await getActiveSessionId(), model: settings.selectedModel, tabId: null, effort: null, provider: null };
-        const text = String(message.text || '').slice(0, 8000);
-        const taskId = crypto.randomUUID();
-        await appendMessageToSession(session.sessionId, { role: 'user', content: text, timestamp: Date.now() });
-        broadcastMessage({ type: 'external_user_message', sessionId: session.sessionId, text });
-
-        const finished = new Promise((resolve) => {
-          const timer = setTimeout(() => { removeInternalListener(listener); resolve({ type: 'task_error', error: 'It took too long.' }); }, 10 * 60 * 1000);
-          const listener = (p) => {
-            if (p.taskId === taskId && (p.type === 'task_complete' || p.type === 'task_error' || p.type === 'task_aborted')) {
-              clearTimeout(timer);
-              removeInternalListener(listener);
-              resolve(p);
-            }
-          };
-          addInternalListener(listener);
-        });
-        handleChatStream(taskId, session.sessionId, text, session.model, false, session.tabId, session.effort, session.provider).catch((err) => {
-          console.warn('Mascot follow-up failed:', err);
-        });
-        const result = await finished;
-        if (result.type === 'task_complete') {
-          const answer = String(result.fullAnswer || result.summary || '')
-            .replace(/<(thought|think)>[\s\S]*?<\/\1>/gi, '')
-            .replace(/<next_steps_suggestions>[\s\S]*?(<\/next_steps_suggestions>|$)/gi, '')
-            .replace(/<agent_run>[\s\S]*?<\/agent_run>/gi, '')
-            .replace(/<approval_card>[\s\S]*?(<\/approval_card>|$)/gi, '')
-            .trim();
-          sendResponse?.({ success: true, text: answer || '…' });
-        } else {
-          sendResponse?.({ success: false, error: result.error || 'Cancelled.' });
-        }
-      } catch (err) {
-        sendResponse?.({ success: false, error: err.message || String(err) });
-      }
-    })();
-    return true;
-  }
-
-  if (message?.type === 'mascot_btw') {
-    (async () => {
-      try {
-        const settings = await getSettings();
-        const targetModel = mascot.model || settings.selectedModel || DEFAULT_MODEL;
-        const endpointInfo = await resolveInferenceEndpoint(targetModel, settings.bridgeUrl, mascot.provider);
-        const history = Array.isArray(message.history) ? message.history.slice(-6) : [];
-        const res = await fetchInferenceWithFallback(endpointInfo, {
-          model: endpointInfo.model,
-          messages: [
-            { role: 'system', content: 'You are a quick side assistant ("By The Way"). The user asks a short question while another task runs elsewhere; you cannot see that task. Answer accurately and concisely, in the language of the question.' },
-            ...history,
-            { role: 'user', content: String(message.text || '').slice(0, 4000) },
-          ],
-          temperature: 0.5,
-          stream: false,
-          max_tokens: 2048,
-          ...getProviderModes(endpointInfo.model, settings, endpointInfo),
-        }, null);
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
-          sendResponse?.({ success: false, error: `Error ${res.status}: ${errText || res.statusText}` });
-          return;
-        }
-        const data = await res.json();
-        sendResponse?.({ success: true, text: data.choices?.[0]?.message?.content || '' });
-      } catch (err) {
-        sendResponse?.({ success: false, error: err.message || String(err) });
-      }
-    })();
-    return true;
-  }
+  // mascot_followup / mascot_btw (free-text chat inside the page) were removed: the mascot now opens the side panel.
 
   if (message?.type === 'CHECK_ACTIVE_TASK') {
     const tabId = sender.tab?.id;
@@ -4743,22 +4795,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     sendResponse?.({ success: true });
-    return true;
-  }
-
-  if (message?.type === 'antigravity_ask_selection' || message?.type === 'zylo_ask_selection') {
-    (async () => {
-      if (sender.tab?.id && chrome.sidePanel?.open) {
-        await chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => null);
-      }
-      broadcastMessage({
-        type: 'preset_prompt',
-        selectedText: message.text,
-        text: `Respecto a este fragmento seleccionado: "${message.text}"\n\n`,
-        url: message.url,
-        title: message.title,
-      });
-    })();
     return true;
   }
 
