@@ -62,7 +62,7 @@ Tiene dos modos:
 
 - 🔌 **Tú eliges el cerebro.** Usa modelos de Gemini, Claude u OpenAI y cámbialos con un clic.
 - 🧰 **Dos formas de conectarte.** Con una **terminal local** (la herramienta de línea de comandos de cada proveedor, a través de un programa pequeño llamado *Model Bridge*) **o** pegando tu propia **API key** para hablar directo con el proveedor.
-- 🔒 **Privado por diseño.** No hay ningún servidor de Autono en el medio. Tus claves y tus chats se quedan en tu computador.
+- 🔒 **Privado por diseño.** No hay ningún servidor de Autono en el medio. Tus claves y tu historial se quedan en tu computador; tus mensajes y la página en la que estás van solo al proveedor que elegiste (o a tu propio Bridge). Ver [PRIVACY.md](PRIVACY.md).
 - 🧠 **Controlas cuánto piensa.** Niveles de razonamiento Bajo / Medio / Alto según el modelo.
 - 🆓 **Gratis y de código abierto (MIT).**
 
