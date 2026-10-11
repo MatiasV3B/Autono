@@ -4530,8 +4530,23 @@ const CONTENT_SCRIPT_TYPES = new Set([
 ]);
 const PICKER_TYPES = new Set(['antigravity_picked_fragment', 'zylo_picked_fragment', 'antigravity_picker_cancelled', 'zylo_picker_cancelled']);
 // Tabs the side panel armed the element picker on (tabId -> expiry). A pick from any other tab is ignored.
+// Kept in memory and in storage.session so it survives the service worker going idle while the user picks.
 const pickerArmedTabs = new Map();
 const PICKER_ARM_MS = 10 * 60 * 1000;
+async function consumePickerArm(tabId) {
+  let until = pickerArmedTabs.get(tabId);
+  let stored = {};
+  try {
+    stored = (await chrome.storage.session.get('autono_picker_armed')).autono_picker_armed || {};
+    if (!until) until = stored[tabId];
+  } catch (_) { /* no session storage: memory only */ }
+  pickerArmedTabs.delete(tabId);
+  if (stored[tabId] !== undefined) {
+    delete stored[tabId];
+    chrome.storage.session.set({ autono_picker_armed: stored }).catch(() => null);
+  }
+  return !!until && until >= Date.now();
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const msgType = message?.type;
@@ -4552,15 +4567,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     if (PICKER_TYPES.has(msgType)) {
-      const until = pickerArmedTabs.get(sender.tab.id);
-      pickerArmedTabs.delete(sender.tab.id);
-      if (!until || until < Date.now()) return false;
+      const picked = msgType === 'antigravity_picked_fragment' || msgType === 'zylo_picked_fragment';
+      consumePickerArm(sender.tab.id).then((armed) => {
+        if (!armed) return; // this tab was never armed by the panel
+        if (picked) {
+          broadcastMessage({
+            type: 'page_fragment_picked',
+            text: String(message.text || '').slice(0, 4000),
+            element: String(message.element || '').slice(0, 200),
+            url: sender.tab.url || '',
+            title: String(message.title || '').slice(0, 300),
+          });
+        } else {
+          broadcastMessage({ type: 'page_picker_cancelled' });
+        }
+      });
+      return false;
     }
   }
 
   if (msgType === 'antigravity_picker_armed' && Number.isInteger(message.tabId)) {
-    pickerArmedTabs.set(message.tabId, Date.now() + PICKER_ARM_MS);
-    sendResponse?.({ success: true });
+    const until = Date.now() + PICKER_ARM_MS;
+    pickerArmedTabs.set(message.tabId, until);
+    (async () => {
+      try {
+        const stored = (await chrome.storage.session.get('autono_picker_armed')).autono_picker_armed || {};
+        stored[message.tabId] = until;
+        await chrome.storage.session.set({ autono_picker_armed: stored });
+      } catch (_) { /* memory only */ }
+      sendResponse?.({ success: true });
+    })();
     return true;
   }
 
@@ -4795,24 +4831,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     sendResponse?.({ success: true });
-    return true;
-  }
-
-  if (message?.type === 'antigravity_picked_fragment' || message?.type === 'zylo_picked_fragment') {
-    broadcastMessage({
-      type: 'page_fragment_picked',
-      text: message.text,
-      element: message.element,
-      url: message.url,
-      title: message.title,
-    });
-    return true;
-  }
-
-  if (message?.type === 'antigravity_picker_cancelled' || message?.type === 'zylo_picker_cancelled') {
-    broadcastMessage({
-      type: 'page_picker_cancelled',
-    });
     return true;
   }
 
