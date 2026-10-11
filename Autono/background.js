@@ -3,6 +3,11 @@
  * Manages AntigravityBridge connection, Chat & Cowork execution, background tasks, and session persistence.
  */
 
+// --- Autono security: helpers (untrusted-data nonce block, URL validation, result capping) ---
+importScripts('lib/autono-security.js');
+const AS = self.AutonoSecurity;
+// --- end ---
+
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_MODEL = 'gemini-3.8-flash';
 
@@ -47,11 +52,16 @@ async function getSettings() {
     s.bridgeUrl = s.bridgeUrl.replace(':8000', ':8765').replace(/\/$/, '');
     chrome.storage.local.set({ antigravity_settings: s }).catch(() => null);
   }
+  // --- Autono security: validated URLs (A20) ---
+  const bridgeUrlChecked = AS.parseBridgeUrl(s.bridgeUrl || DEFAULT_BRIDGE_URL);
+  const safeBridgeUrl = bridgeUrlChecked.ok ? bridgeUrlChecked.url : DEFAULT_BRIDGE_URL;
+  const mcpUrlChecked = AS.parseBridgeUrl(s.localMcpUrl || data.autono_local_mcp_url || '');
+  // --- end ---
   return {
-    bridgeUrl: s.bridgeUrl || DEFAULT_BRIDGE_URL,
+    bridgeUrl: safeBridgeUrl,
     selectedModel: s.selectedModel || DEFAULT_MODEL,
     localMcpBridgeEnabled: s.localMcpBridgeEnabled !== undefined ? s.localMcpBridgeEnabled : (data.autono_local_mcp_bridge_enabled !== undefined ? Boolean(data.autono_local_mcp_bridge_enabled) : false),
-    localMcpUrl: s.localMcpUrl || data.autono_local_mcp_url || `${s.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`,
+    localMcpUrl: mcpUrlChecked.ok ? mcpUrlChecked.url : `${safeBridgeUrl}/mcp/sse`,
     antigravityMode: s.antigravityMode || data.antigravity_antigravity_mode || 'desktop',
     geminiApiKey: s.geminiApiKey || data.antigravity_gemini_api_key || '',
     claudeMode: s.claudeMode || data.antigravity_claude_mode || 'desktop',
@@ -60,13 +70,20 @@ async function getSettings() {
     openaiApiKey: s.openaiApiKey || data.antigravity_openai_api_key || '',
     temperature: s.temperature !== undefined ? s.temperature : 0.2,
     autoCaptureScreenshot: !!s.autoCaptureScreenshot,
-    maxSteps: s.maxSteps || 30,
+    maxSteps: AS.clampMaxSteps(s.maxSteps, 30), // Autono security (A19): 1..100
     maxOutputTokens: s.maxOutputTokens || 65536,
     displayMode: s.displayMode || 'side_panel',
-    shadowEnabled: s.shadowEnabled !== undefined ? s.shadowEnabled : true,
+    // Autono security (A19/low): power actions are opt-in; a value the user saved explicitly is kept
+    shadowEnabled: s.shadowEnabled !== undefined ? s.shadowEnabled : false,
     shadowPreventSleep: s.shadowPreventSleep !== undefined ? s.shadowPreventSleep : true,
     shadowAutoWake: s.shadowAutoWake !== undefined ? s.shadowAutoWake : true,
-    shadowOnComplete: s.shadowOnComplete || 'sleep',
+    shadowOnComplete: s.shadowOnComplete || 'none',
+    // --- Autono security: privacy / trust defaults (all off unless the user turned them on) ---
+    webSearchEnabled: s.webSearchEnabled === true, // A22
+    forwardKeysToBridge: s.forwardKeysToBridge === true, // A11
+    autoAllowExternalActions: s.autoAllowExternalActions === true, // A10
+    bridgeNoSystemRole: s.bridgeNoSystemRole === true, // A4 fallback when a route cannot take the system role
+    // --- end ---
     tabGrouping: s.tabGrouping !== undefined ? s.tabGrouping : true,
     workingOverlay: s.workingOverlay !== undefined ? s.workingOverlay : true,
     tabLockedSidebar: s.tabLockedSidebar !== undefined ? s.tabLockedSidebar : false,
