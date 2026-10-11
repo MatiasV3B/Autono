@@ -3989,60 +3989,106 @@ async function executeScrollAction(tabId, direction) {
 let mcpBridgePollerActive = false;
 let mcpBridgeAbortController = null;
 
+// --- Autono security: external-control poller (A10) ---
+// Loopback only (a non-loopback host needs a stored per-host confirmation), pairing token on poll and
+// result, stops after 10 consecutive failures, started only from worker start or an explicit panel toggle.
+const MCP_MAX_FAILURES = 10;
+const MCP_TRUSTED_HOSTS_KEY = 'autono_mcp_trusted_hosts';
+const MCP_APPROVAL_ACTIONS = new Set(['navigate', 'browser_navigate', 'click', 'browser_click', 'type', 'browser_type', 'screenshot', 'browser_screenshot', 'browser_task']);
+const MCP_ALLOWED_ACTIONS = new Set(['get_active_tab', 'browser_get_active_tab', ...MCP_APPROVAL_ACTIONS]);
+const pendingExternalApprovals = new Map();
+let mcpStatus = { state: 'off', reason: '', host: '', lastAction: null }; // shown in the panel
+
+function setMcpStatus(patch) {
+  mcpStatus = { ...mcpStatus, ...patch };
+  broadcastMessage({ type: 'mcp_bridge_status', status: mcpStatus });
+}
+
+async function mcpHostIsTrusted(parsed) {
+  if (parsed.loopback) return true;
+  const data = await chrome.storage.local.get(MCP_TRUSTED_HOSTS_KEY).catch(() => ({}));
+  const hosts = Array.isArray(data[MCP_TRUSTED_HOSTS_KEY]) ? data[MCP_TRUSTED_HOSTS_KEY] : [];
+  return hosts.includes(parsed.host);
+}
+
+function requestExternalActionApproval(actionItem, summary) {
+  return new Promise((resolve) => {
+    const requestId = `ext_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const timer = setTimeout(() => finish(false), 60 * 1000);
+    const finish = (ok) => {
+      clearTimeout(timer);
+      pendingExternalApprovals.delete(requestId);
+      resolve(Boolean(ok));
+    };
+    pendingExternalApprovals.set(requestId, finish);
+    if (activePorts.size === 0) return finish(false); // nobody to ask: deny
+    broadcastMessage({ type: 'external_action_request', requestId, action: String(actionItem.action).slice(0, 40), summary });
+  });
+}
+
 async function startMcpBridgePoller() {
   if (mcpBridgePollerActive) return;
   mcpBridgePollerActive = true;
   mcpBridgeAbortController = new AbortController();
+  let failures = 0;
 
-  console.log('[MCP Bridge] Starting active browser action listener...');
+  const settings0 = await getSettings();
+  const parsed = AS.parseBridgeUrl(settings0.localMcpUrl || `${settings0.bridgeUrl}/mcp/sse`);
+  const token = await getPairingToken();
+  const refuse = (reason) => {
+    mcpBridgePollerActive = false;
+    mcpBridgeAbortController = null;
+    setMcpStatus({ state: 'blocked', reason });
+  };
+  if (!parsed.ok) return refuse('invalid_url');
+  if (!(await mcpHostIsTrusted(parsed))) return refuse('host_not_confirmed');
+  if (!token) return refuse('no_pairing_token');
+  const mcpBridgeBaseUrl = parsed.origin;
+  setMcpStatus({ state: 'running', reason: '', host: parsed.host });
 
   while (mcpBridgePollerActive) {
     try {
       const settings = await getSettings();
-      if (!settings.localMcpBridgeEnabled) {
-        mcpBridgePollerActive = false;
-        break;
-      }
-
-      const rawMcp = settings.localMcpUrl || `${settings.bridgeUrl || DEFAULT_BRIDGE_URL}/mcp/sse`;
-      let mcpBridgeBaseUrl;
-      try {
-        const u = new URL(rawMcp.startsWith('http') ? rawMcp : `http://${rawMcp}`);
-        mcpBridgeBaseUrl = `${u.protocol}//${u.host}`;
-      } catch (_) {
-        mcpBridgeBaseUrl = (settings.bridgeUrl || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
-      }
+      if (!settings.localMcpBridgeEnabled) break;
 
       const resp = await fetch(`${mcpBridgeBaseUrl}/api/mcp/pending_actions?timeout=15`, {
+        headers: { 'X-Autono-Token': await getPairingToken() },
+        redirect: 'error',
         signal: mcpBridgeAbortController?.signal,
-      }).catch(() => null);
+      }).catch((e) => (e && e.name === 'AbortError' ? 'aborted' : null));
 
+      if (resp === 'aborted') break;
       if (!resp || !resp.ok) {
-        // Model bridge might be offline; pause before retrying
-        await new Promise((r) => setTimeout(r, 3000));
+        failures += 1;
+        if (failures >= MCP_MAX_FAILURES) {
+          mcpBridgePollerActive = false;
+          setMcpStatus({ state: 'stopped', reason: resp && (resp.status === 401 || resp.status === 403) ? 'unauthorized' : 'too_many_failures' });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(30000, 2000 * failures)));
         continue;
       }
+      failures = 0;
 
       const data = await resp.json().catch(() => null);
       if (data && data.has_action && data.action) {
-        const actionItem = data.action;
-        console.log('[MCP Bridge] Received action from local agent:', actionItem);
-        // Execute asynchronously so the poller doesn't get blocked
-        handleMcpAction(actionItem, mcpBridgeBaseUrl).catch((err) => {
-          console.error('[MCP Bridge] Error handling action:', err);
-        });
+        // Execute asynchronously so the poller doesn't get blocked (the action itself is never logged)
+        handleMcpAction(data.action, mcpBridgeBaseUrl).catch(() => null);
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
-        break;
+      if (err.name === 'AbortError') break;
+      failures += 1;
+      if (failures >= MCP_MAX_FAILURES) {
+        mcpBridgePollerActive = false;
+        setMcpStatus({ state: 'stopped', reason: 'too_many_failures' });
+        return;
       }
-      console.warn('[MCP Bridge] Polling error:', err);
       await new Promise((r) => setTimeout(r, 4000));
     }
   }
 
   mcpBridgePollerActive = false;
-  console.log('[MCP Bridge] Active browser action listener stopped.');
+  if (mcpStatus.state === 'running') setMcpStatus({ state: 'off', reason: '' });
 }
 
 function stopMcpBridgePoller() {
@@ -4053,14 +4099,44 @@ function stopMcpBridgePoller() {
     } catch (_) {}
     mcpBridgeAbortController = null;
   }
+  for (const finish of Array.from(pendingExternalApprovals.values())) { try { finish(false); } catch (_) {} }
+  setMcpStatus({ state: 'off', reason: '' });
 }
+// --- end ---
 
 async function handleMcpAction(actionItem, bridgeUrl) {
-  const { action_id, action, params } = actionItem;
+  const { action_id, action, params } = actionItem || {};
   let result = null;
   let error = null;
 
+  // --- Autono security: validate, announce and (unless auto-allowed) approve every external action (A10) ---
+  if (typeof action_id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(action_id)) return; // unguessable ids only
   try {
+    if (typeof action !== 'string' || !MCP_ALLOWED_ACTIONS.has(action)) throw new Error('Unsupported browser action');
+    const settingsExt = await getSettings();
+    const safeParams = params && typeof params === 'object' ? params : {};
+    const summary = (() => {
+      const pick = (v) => AS.capPlain(v, 200);
+      if (/navigate/.test(action)) return `Open ${pick(safeParams.url)}`;
+      if (/click/.test(action)) return `Click ${pick(safeParams.selector)}`;
+      if (/type/.test(action)) return `Type ${pick(safeParams.text)} into ${pick(safeParams.selector)}`;
+      if (/screenshot/.test(action)) return 'Take a screenshot of the visible tab';
+      if (action === 'browser_task') return `Run a ${pick(safeParams.mode || 'cowork')} task: ${pick(safeParams.goal)}`;
+      return 'Read the active tab (title, URL, first 5000 characters)';
+    })();
+    setMcpStatus({ lastAction: { action, summary, at: Date.now() } });
+    broadcastMessage({ type: 'external_action', action, summary, host: mcpStatus.host }); // persistent in-panel indicator
+    if (MCP_APPROVAL_ACTIONS.has(action) && !settingsExt.autoAllowExternalActions) {
+      const allowed = await requestExternalActionApproval(actionItem, summary);
+      if (!allowed) throw new Error('The user did not allow this external action');
+    }
+  } catch (gateErr) {
+    error = gateErr.message || String(gateErr);
+  }
+  // --- end ---
+
+  try {
+    if (error) throw new Error(error);
     switch (action) {
       case 'get_active_tab':
       case 'browser_get_active_tab': {
@@ -4236,11 +4312,13 @@ async function handleMcpAction(actionItem, bridgeUrl) {
   try {
     await fetch(`${bridgeUrl}/api/mcp/action_result`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Autono-Token': await getPairingToken() },
+      redirect: 'error',
       body: JSON.stringify(payload),
     });
   } catch (postErr) {
-    console.warn('[MCP Bridge] Failed to post action result to bridge:', postErr);
+    // not logged with details: the payload can hold page content
+    console.warn('[MCP Bridge] Failed to post action result to bridge');
   }
 }
 
@@ -4349,6 +4427,7 @@ chrome.runtime.onConnect.addListener((port) => {
         settings,
         sessions,
         activeSessionId: activeId,
+        mcpStatus, // Autono security (A10)
         runningTask: runningTask ? {
           taskId: runningTask.taskId,
           sessionId: runningTask.sessionId,
@@ -4471,6 +4550,44 @@ chrome.runtime.onConnect.addListener((port) => {
             await checkBridgeHealth();
             break;
           }
+
+          // --- Autono security: explicit remote-control toggle, approvals (A10) ---
+          case 'mcp_bridge_set': {
+            if (!isExtPage(port.sender)) break;
+            const enabled = msg.enabled === true;
+            const cur = await chrome.storage.local.get('antigravity_settings');
+            const s = cur.antigravity_settings || {};
+            s.localMcpBridgeEnabled = enabled;
+            await chrome.storage.local.set({ antigravity_settings: s, autono_local_mcp_bridge_enabled: enabled });
+            if (enabled) {
+              const sNow = await getSettings();
+              const parsed = AS.parseBridgeUrl(sNow.localMcpUrl);
+              if (parsed.ok && !parsed.loopback && msg.confirmHost === parsed.host) {
+                const d = await chrome.storage.local.get(MCP_TRUSTED_HOSTS_KEY);
+                const hosts = Array.isArray(d[MCP_TRUSTED_HOSTS_KEY]) ? d[MCP_TRUSTED_HOSTS_KEY] : [];
+                if (!hosts.includes(parsed.host)) hosts.push(parsed.host);
+                await chrome.storage.local.set({ [MCP_TRUSTED_HOSTS_KEY]: hosts.slice(-10) });
+              }
+              stopMcpBridgePoller();
+              startMcpBridgePoller();
+            } else {
+              stopMcpBridgePoller();
+            }
+            break;
+          }
+
+          case 'external_action_response': {
+            if (!isExtPage(port.sender)) break;
+            const fin = pendingExternalApprovals.get(msg.requestId);
+            if (fin) fin(msg.allow === true);
+            break;
+          }
+
+          case 'mcp_status_request': {
+            port.postMessage({ type: 'mcp_bridge_status', status: mcpStatus });
+            break;
+          }
+          // --- end ---
 
           case 'set_active_session': {
             await setActiveSessionId(msg.sessionId);
@@ -4976,33 +5093,14 @@ if (chrome.alarms) {
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === 'autono_sw_keepalive') {
         checkBridgeHealth().catch(() => null);
-        getSettings().then((s) => {
-          if (s.localMcpBridgeEnabled && !mcpBridgePollerActive) {
-            startMcpBridgePoller();
-          }
-        }).catch(() => null);
+        // Autono security (A10): the alarm no longer restarts the remote-control poller
       }
     });
   } catch (_) {}
 }
 
-// ─── Storage Changes Listener for MCP Bridge ───────────────────────────────
-if (chrome.storage && chrome.storage.onChanged) {
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local') {
-      if (changes.autono_local_mcp_bridge_enabled) {
-        if (changes.autono_local_mcp_bridge_enabled.newValue) {
-          startMcpBridgePoller();
-        } else {
-          stopMcpBridgePoller();
-        }
-      } else if (changes.autono_local_mcp_url && mcpBridgePollerActive) {
-        stopMcpBridgePoller();
-        startMcpBridgePoller();
-      }
-    }
-  });
-}
+// Autono security (A10): there is no storage-change listener any more; the poller starts only here
+// (worker start with the setting on) and from the panel's explicit 'mcp_bridge_set' port message.
 
 // Start MCP poller on initial boot if enabled
 getSettings().then((s) => {
