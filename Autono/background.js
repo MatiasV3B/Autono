@@ -79,6 +79,10 @@ async function getSettings() {
     multiAgent: !!s.multiAgent,
     agentConfirm: s.agentConfirm !== false,
     mascot: s.mascot !== false,
+    // --- Autono security: autonomy level and code-execution switch ---
+    autonomyMode: ['supervised', 'semi', 'full'].includes(s.autonomyMode) ? s.autonomyMode : 'supervised',
+    allowCodeExecution: s.allowCodeExecution === true,
+    // --- end ---
   };
 }
 
@@ -1210,6 +1214,7 @@ async function saveSettings(rawSettings) {
   }
 }
 
+
 async function getSessions() {
   try {
     const data = await chrome.storage.local.get('antigravity_sessions');
@@ -1591,6 +1596,12 @@ function isRestrictedUrl(url) {
     lower.startsWith('devtools://') ||
     lower.startsWith('chrome-untrusted://') ||
     lower.startsWith('chrome-search://') ||
+    lower.startsWith('file:') || // Autono security: local files and inline documents are never agent targets
+    lower.startsWith('data:') ||
+    lower.startsWith('blob:') ||
+    lower.startsWith('javascript:') ||
+    lower.startsWith('filesystem:') ||
+    lower.startsWith('ftp:') ||
     lower.includes('chrome.google.com/webstore') ||
     lower.includes('chromewebstore.google.com')
   );
@@ -1603,6 +1614,371 @@ function isUsableWebPage(url) {
   if (!lower.startsWith('http://') && !lower.startsWith('https://')) return false;
   return !isRestrictedUrl(lower);
 }
+
+// --- Autono security: url validation ---
+// Every place where the agent (or a sub-agent, or the MCP bridge) chooses a destination goes through validateAgentUrl().
+// It is pure (no chrome.* calls) so tests/security-sprint2.test.js can load this block in plain node.
+const AGENT_URL_MAX_LEN = 2000;
+const TWO_LEVEL_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'com.br', 'com.mx', 'com.ar', 'com.co',
+  'com.pe', 'co.jp', 'ne.jp', 'or.jp', 'co.in', 'co.nz', 'co.za', 'com.cn', 'com.tr', 'com.sg', 'com.hk', 'com.tw', 'co.kr',
+]);
+
+function agentParseIPv4(host) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return null;
+  const p = m.slice(1).map(Number);
+  return p.some((n) => n > 255) ? null : p;
+}
+
+function agentPrivateIPv4Reason(p) {
+  const [a, b] = p;
+  if (a === 0) return 'the 0.0.0.0/8 range';
+  if (a === 10) return 'a private network address (10.0.0.0/8)';
+  if (a === 127) return 'a loopback address (127.0.0.0/8)';
+  if (a === 169 && b === 254) return 'a link-local address (169.254.0.0/16)';
+  if (a === 172 && b >= 16 && b <= 31) return 'a private network address (172.16.0.0/12)';
+  if (a === 192 && b === 168) return 'a private network address (192.168.0.0/16)';
+  if (a === 100 && b >= 64 && b <= 127) return 'a carrier-grade NAT address (100.64.0.0/10)';
+  if (a === 198 && (b === 18 || b === 19)) return 'a benchmark-network address (198.18.0.0/15)';
+  if (a >= 224) return 'a multicast or reserved address';
+  return '';
+}
+
+function agentParseIPv6(text) {
+  let str = String(text || '').toLowerCase().split('%')[0];
+  const tail4 = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(str);
+  if (tail4) {
+    const p = agentParseIPv4(tail4[2]);
+    if (!p) return null;
+    str = tail4[1] + ((p[0] << 8) | p[1]).toString(16) + ':' + ((p[2] << 8) | p[3]).toString(16);
+  }
+  const halves = str.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  let groups;
+  if (halves.length === 2) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 1) return null;
+    groups = [...head, ...Array(missing).fill('0'), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+  const out = groups.map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+  return out.some(Number.isNaN) ? null : out;
+}
+
+// Returns a human reason when the host is local / private / internal, '' when it looks like a public host.
+function agentPrivateHostReason(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/\.+$/, '');
+  if (!h) return 'an empty host name';
+  if (h.startsWith('[') && h.endsWith(']')) {
+    const g = agentParseIPv6(h.slice(1, -1));
+    if (!g) return 'an IPv6 address that could not be parsed';
+    const embedded = (hi, lo) => agentPrivateIPv4Reason([hi >> 8, hi & 255, lo >> 8, lo & 255]);
+    if (g.every((n) => n === 0)) return 'the unspecified IPv6 address';
+    if (g.slice(0, 7).every((n) => n === 0) && g[7] === 1) return 'the IPv6 loopback address';
+    if ((g[0] & 0xfe00) === 0xfc00) return 'a unique-local IPv6 address (fc00::/7)';
+    if ((g[0] & 0xffc0) === 0xfe80) return 'a link-local IPv6 address';
+    if ((g[0] & 0xffc0) === 0xfec0) return 'a site-local IPv6 address';
+    if ((g[0] & 0xff00) === 0xff00) return 'an IPv6 multicast address';
+    if (g.slice(0, 5).every((n) => n === 0) && (g[5] === 0xffff || g[5] === 0)) return embedded(g[6], g[7]) || 'an IPv4-mapped IPv6 address';
+    if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((n) => n === 0)) return embedded(g[6], g[7]) || 'a NAT64 IPv6 address';
+    if (g[0] === 0x2002) return embedded(g[1], g[2]) || '';
+    return '';
+  }
+  const v4 = agentParseIPv4(h);
+  if (v4) return agentPrivateIPv4Reason(v4);
+  if (h === 'localhost' || h.endsWith('.localhost')) return 'localhost';
+  if (/\.(local|internal|lan|home|home\.arpa|localdomain|intranet|corp|private)$/.test(h)) return 'a local-network host name';
+  if (!h.includes('.')) return 'a single-label (intranet) host name';
+  return '';
+}
+
+function agentRegistrableDomain(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/\.+$/, '');
+  if (!h || h.startsWith('[') || agentParseIPv4(h)) return h;
+  const labels = h.split('.');
+  if (labels.length <= 2) return h;
+  const last2 = labels.slice(-2).join('.');
+  return TWO_LEVEL_SUFFIXES.has(last2) ? labels.slice(-3).join('.') : last2;
+}
+
+// opts: { assumeHttps: add https:// to a scheme-less value, blockedOrigins: ['http://127.0.0.1:8765', ...] }
+// Returns { ok:false, error } or { ok:true, url, origin, host, registrable, needsConfirm: null | {kind, reason} }.
+function validateAgentUrl(raw, opts = {}) {
+  const fail = (error) => ({ ok: false, error });
+  if (typeof raw !== 'string') return fail('the address is missing');
+  let text = raw.trim();
+  if (!text) return fail('the address is empty');
+  if (text.length > AGENT_URL_MAX_LEN) return fail(`the address is longer than ${AGENT_URL_MAX_LEN} characters`);
+  if (/[\u0000-\u001f\u007f]/.test(text)) return fail('the address contains control characters');
+  if (opts.assumeHttps) {
+    const hasScheme = /^[a-z][a-z0-9+.\-]*:/i.test(text) && !/^[a-z0-9.\-]+:\d+(\/|$|\?|#)/i.test(text);
+    if (!hasScheme) text = 'https://' + text.replace(/^\/\//, '');
+  }
+  let u;
+  try { u = new URL(text); } catch { return fail('the address is not a valid URL'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return fail(`the "${u.protocol}" scheme is not allowed (only http and https)`);
+  if (u.username || u.password) return fail('the address contains embedded credentials');
+  const host = u.hostname.toLowerCase().replace(/\.+$/, '');
+  if (!host) return fail('the address has no host');
+  let needsConfirm = null;
+  const privateReason = agentPrivateHostReason(host);
+  if (privateReason) needsConfirm = { kind: 'private_network', reason: `${host} is ${privateReason}` };
+  if ((opts.blockedOrigins || []).includes(u.origin)) {
+    needsConfirm = { kind: 'private_network', reason: `${u.origin} is the address of your Autono Bridge / MCP bridge` };
+  }
+  return { ok: true, url: u.href, origin: u.origin, host, registrable: agentRegistrableDomain(host), needsConfirm };
+}
+
+// Origins of the services Autono itself talks to (never a normal agent destination)
+function agentInternalOrigins(settings) {
+  const out = [];
+  for (const v of [settings?.bridgeUrl, settings?.localMcpUrl]) {
+    try { if (v) out.push(new URL(/^[a-z]+:\/\//i.test(v) ? v : `http://${v}`).origin); } catch { /* ignore */ }
+  }
+  return out;
+}
+// --- end ---
+
+// --- Autono security: sensitive action classifier ---
+const SENSITIVE_ACTION_RE = /\b(pay|buy|order|purchase|send|delete|remove|transfer|authorize|allow|grant|publish|confirm|submit|checkout|pagar|comprar|enviar|eliminar|borrar|transferir|autorizar|permitir|publicar|confirmar|pago|compra)\b/i;
+const SENSITIVE_FIELD_RE = /(password|passwd|pwd|passcode|\bpin\b|token|secret|cvv|cvc|credit.?card|card.?number|ssn|auth(?!or)|one-time-code|otp|verification|iban|account|routing|\bdob\b|security)/i;
+
+const SENSITIVE_SITE_RULES = [
+  // webmail
+  [/^(web)?mail\./, 'webmail'],
+  [/(^|\.)(mail\.google\.com|outlook\.live\.com|outlook\.office\.com|outlook\.office365\.com|mail\.yahoo\.com|proton\.me|protonmail\.com|fastmail\.com|icloud\.com|zoho\.com)$/, 'webmail'],
+  // banking and payments
+  [/(^|\.)(paypal\.com|paypal\.me|stripe\.com|wise\.com|revolut\.com|venmo\.com|cash\.app|payoneer\.com|mercadopago\.[a-z.]+|binance\.com|coinbase\.com|kraken\.com|chase\.com|bankofamerica\.com|wellsfargo\.com|citi\.com|capitalone\.com|americanexpress\.com|pay\.google\.com|hsbc\.[a-z.]+|santander\.[a-z.]+|bbva\.[a-z.]+|barclays\.[a-z.]+|nubank\.com\.br)$/, 'banking / payments'],
+  [/(^|[.-])(bank|banco|banking|banca)([.-]|$)/, 'banking / payments'],
+  // password managers
+  [/(^|\.)(1password\.com|bitwarden\.com|lastpass\.com|dashlane\.com|keepersecurity\.com|nordpass\.com)$/, 'password manager'],
+  // cloud consoles
+  [/(^|\.)(console\.aws\.amazon\.com|signin\.aws\.amazon\.com|portal\.azure\.com|console\.cloud\.google\.com|dash\.cloudflare\.com|console\.firebase\.google\.com|cloud\.digitalocean\.com|vercel\.com|netlify\.com|supabase\.com|heroku\.com|admin\.google\.com)$/, 'cloud console'],
+  [/^(console|admin)\./, 'cloud console'],
+  // code hosts
+  [/(^|\.)(github\.com|gitlab\.com|bitbucket\.org|dev\.azure\.com|codeberg\.org)$/, 'code host'],
+  // account / login portals
+  [/^(accounts?|login|signin|sso|auth|id|myaccount|secure)\./, 'account / sign-in portal'],
+];
+const SENSITIVE_PATH_RE = /\/(oauth2?|o\/oauth2|authorize|consent|signin\/oauth|saml|checkout)(\/|$|\?)|[?&]client_id=/i;
+
+// Returns a short reason string when the URL is on the built-in always-ask list, '' otherwise.
+function agentSensitiveSiteReason(urlString) {
+  let u;
+  try { u = new URL(urlString); } catch { return ''; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  const host = u.hostname.toLowerCase().replace(/\.+$/, '');
+  for (const [re, label] of SENSITIVE_SITE_RULES) if (re.test(host)) return label;
+  if (SENSITIVE_PATH_RE.test(u.pathname + u.search)) return 'sign-in / authorization page';
+  return '';
+}
+
+function agentLabelIsSensitive(text) {
+  return SENSITIVE_ACTION_RE.test(String(text || ''));
+}
+
+function agentFieldIsSensitive(f) {
+  if (!f) return false;
+  const ac = String(f.autocomplete || '').toLowerCase();
+  if (String(f.type || '').toLowerCase() === 'password') return true;
+  if (ac.includes('password') || ac.includes('cc-') || ac.includes('one-time-code')) return true;
+  return SENSITIVE_FIELD_RE.test(`${f.name || ''} ${f.id || ''} ${f.placeholder || ''} ${f.ariaLabel || ''} ${f.labelText || ''}`);
+}
+// --- end ---
+
+// --- Autono security: action approval ---
+// Human-in-the-loop for Cowork and tab agents. Everything shown to the user is computed here from the real
+// destination / element / text, never from the model's "description". Default answer is "deny" after 5 minutes.
+const pendingActionPermissions = new Map(); // requestId -> { finish, taskId }
+const taskAgentApprovals = new Set(); // task ids where the user chose "Allow for this task only" for sub-agents
+const incognitoApprovedTabs = new Set();
+
+function requestActionApproval(taskId, sessionId, details, signal) {
+  const requestId = `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = (decision) => {
+      clearTimeout(timer);
+      pendingActionPermissions.delete(requestId);
+      broadcastMessage({ type: 'action_permission_resolved', requestId });
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve(['once', 'site'].includes(decision) ? decision : 'deny');
+    };
+    const onAbort = () => finish('deny');
+    timer = setTimeout(() => finish('deny'), 5 * 60 * 1000); // no answer: treat as "no"
+    pendingActionPermissions.set(requestId, { finish, taskId });
+    if (signal) {
+      if (signal.aborted) return finish('deny');
+      signal.addEventListener('abort', onAbort);
+    }
+    const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+    const el = details.element || null;
+    broadcastMessage({
+      type: 'action_permission_request',
+      requestId,
+      taskId,
+      sessionId,
+      details: {
+        kind: clip(details.kind, 40),
+        agent: clip(details.agent, 60),
+        reasons: (details.reasons || []).map((r) => clip(r, 200)).slice(0, 8),
+        pageUrl: clip(details.pageUrl, 2000),
+        destinationUrl: clip(details.destinationUrl, 2000),
+        destinationOrigin: clip(details.destinationOrigin, 300),
+        element: el ? {
+          tag: clip(el.tag, 30), type: clip(el.type, 30), text: clip(el.text, 300),
+          href: clip(el.href, 2000), formAction: clip(el.formAction, 2000), field: clip(el.field, 200),
+        } : null,
+        typed: details.typed == null ? null : clip(details.typed, 600),
+        allowSite: details.allowSite !== false,
+        siteLabel: clip(details.siteLabel, 200),
+      },
+    });
+  });
+}
+
+const GUARD_DENIED_TEXT = 'USER_DENIED: the user did not approve this action. Do not retry it. Choose a different approach or finish and explain.';
+
+// One guard per task (Cowork) or per sub-agent. mode: 'supervised' | 'semi' | 'full'.
+function createActionGuard({ taskId, sessionId, settings, signal, startUrls = [], agentName = '', routinePrompts = true }) {
+  const mode = ['supervised', 'semi', 'full'].includes(settings?.autonomyMode) ? settings.autonomyMode : 'supervised';
+  const blockedOrigins = agentInternalOrigins(settings);
+  const seenDomains = new Set(); // registrable domains the task started on or the user approved visiting
+  const grantedSites = new Set(); // domains the user allowed "for this task"
+  let pageApprovedFor = ''; // domain whose page view was approved (so the next step does not ask again)
+  for (const raw of startUrls) {
+    const v = validateAgentUrl(String(raw || ''));
+    if (v.ok) seenDomains.add(v.registrable);
+  }
+  const askRoutine = routinePrompts && mode === 'supervised';
+
+  const ask = async (details) => {
+    const decision = await requestActionApproval(taskId, sessionId, { agent: agentName, ...details }, signal);
+    if (decision === 'site' && details.siteDomain && details.allowSite !== false) grantedSites.add(details.siteDomain);
+    return decision;
+  };
+
+  const classifyDestination = (v, reasons) => {
+    // v: result of validateAgentUrl(ok). Pushes {code,text} reasons.
+    if (v.needsConfirm) reasons.push({ code: 'private_network', text: `Local or internal address: ${v.needsConfirm.reason}` });
+    if (!seenDomains.has(v.registrable) && !grantedSites.has(v.registrable)) reasons.push({ code: 'new_site', text: `New site for this task: ${v.registrable}` });
+    const sens = agentSensitiveSiteReason(v.url);
+    if (sens && !grantedSites.has(v.registrable)) reasons.push({ code: 'sensitive_site', text: `Sensitive site (${sens}): ${v.registrable}` });
+  };
+
+  const api = {
+    mode,
+    blockedOrigins,
+    allowedDomains: () => [...seenDomains],
+    // Check a navigation the model asked for. Resolves { ok:true, url } or { ok:false, message }.
+    async navigate(rawUrl) {
+      const v = validateAgentUrl(rawUrl, { assumeHttps: true, blockedOrigins });
+      if (!v.ok) return { ok: false, message: `Navigation blocked: ${v.error}. Use a normal public http(s) address.` };
+      const reasons = [];
+      classifyDestination(v, reasons);
+      if (askRoutine && !grantedSites.has(v.registrable) && !reasons.length) reasons.push({ code: 'routine', text: 'Supervised mode asks before every navigation' });
+      if (!reasons.length) return { ok: true, url: v.url };
+      const hard = reasons.some((r) => r.code === 'private_network');
+      const decision = await ask({
+        kind: 'navigate', reasons: reasons.map((r) => r.text), destinationUrl: v.url, destinationOrigin: v.origin,
+        allowSite: !hard, siteDomain: v.registrable, siteLabel: v.registrable,
+      });
+      if (decision === 'deny') return { ok: false, message: GUARD_DENIED_TEXT };
+      seenDomains.add(v.registrable);
+      pageApprovedFor = v.registrable;
+      return { ok: true, url: v.url };
+    },
+    // Called at the top of every step with the page the tab is really on (covers redirects and click navigations).
+    async checkPage(currentUrl) {
+      const v = validateAgentUrl(String(currentUrl || ''));
+      if (!v.ok) return true;
+      if (grantedSites.has(v.registrable) || pageApprovedFor === v.registrable) return true;
+      const reasons = [];
+      classifyDestination(v, reasons);
+      if (!reasons.length) return true;
+      const hard = reasons.some((r) => r.code === 'private_network');
+      const decision = await ask({
+        kind: 'page', reasons: reasons.map((r) => r.text), pageUrl: v.url, destinationUrl: v.url, destinationOrigin: v.origin,
+        allowSite: !hard, siteDomain: v.registrable, siteLabel: v.registrable,
+      });
+      if (decision === 'deny') return false;
+      seenDomains.add(v.registrable);
+      pageApprovedFor = v.registrable;
+      return true;
+    },
+    // Called with facts the page reported about the resolved element, before the click happens.
+    // Resolves true (go ahead) or a string for the model (do not act).
+    async beforeClick(facts, pageUrl) {
+      const reasons = [];
+      const page = validateAgentUrl(String(pageUrl || ''));
+      const pageDomain = page.ok ? page.registrable : '';
+      let dest = null;
+      const rawDest = facts.href || (facts.isSubmit ? facts.formAction : '');
+      if (rawDest) {
+        const v = validateAgentUrl(rawDest, { blockedOrigins });
+        if (v.ok) { dest = v; classifyDestination(v, reasons); }
+        else if (/^(javascript|data|blob|file|ftp|filesystem):/i.test(rawDest)) reasons.push({ code: 'private_network', text: `Link target is not a web address: ${String(rawDest).slice(0, 80)}` });
+      }
+      if (page.ok) {
+        const sens = agentSensitiveSiteReason(page.url);
+        if (sens && !grantedSites.has(pageDomain)) reasons.push({ code: 'sensitive_site', text: `Sensitive site (${sens}): ${pageDomain}` });
+      }
+      if (facts.isSubmit) reasons.push({ code: 'form_submit', text: 'This click submits a form' });
+      if (agentLabelIsSensitive(`${facts.text} ${facts.ariaLabel || ''} ${facts.title || ''}`)) reasons.push({ code: 'sensitive_label', text: 'The button text looks like a payment, send, delete or confirm action' });
+      const unique = [];
+      for (const r of reasons) if (!unique.some((x) => x.text === r.text)) unique.push(r);
+      if (!unique.length && askRoutine && !grantedSites.has(pageDomain)) unique.push({ code: 'routine', text: 'Supervised mode asks before every click' });
+      if (!unique.length) return true;
+      const hard = unique.some((r) => ['private_network', 'form_submit', 'sensitive_label'].includes(r.code));
+      const decision = await ask({
+        kind: 'click', reasons: unique.map((r) => r.text), pageUrl: page.ok ? page.url : String(pageUrl || ''),
+        destinationUrl: dest ? dest.url : '', destinationOrigin: dest ? dest.origin : '',
+        element: { tag: facts.tag, type: facts.type, text: facts.text, href: facts.href, formAction: facts.formAction },
+        allowSite: !hard && !!pageDomain, siteDomain: pageDomain, siteLabel: pageDomain,
+      });
+      if (decision === 'deny') return GUARD_DENIED_TEXT;
+      if (dest && decision) { seenDomains.add(dest.registrable); pageApprovedFor = dest.registrable; }
+      return true;
+    },
+    // Called with facts about the field before typing. Resolves true or a string for the model.
+    async beforeType(facts, value, pageUrl) {
+      const reasons = [];
+      const page = validateAgentUrl(String(pageUrl || ''));
+      const pageDomain = page.ok ? page.registrable : '';
+      const sensitiveField = agentFieldIsSensitive(facts);
+      const text = String(value == null ? '' : value);
+      const submits = /[\r\n]/.test(text);
+      if (sensitiveField) reasons.push({ code: 'sensitive_field', text: 'This field holds a password, card, one-time code or other secret' });
+      if (submits) reasons.push({ code: 'form_submit', text: 'The text ends with Enter, which submits the form' });
+      if (page.ok) {
+        const sens = agentSensitiveSiteReason(page.url);
+        if (sens && !grantedSites.has(pageDomain)) reasons.push({ code: 'sensitive_site', text: `Sensitive site (${sens}): ${pageDomain}` });
+      }
+      if (!reasons.length && askRoutine && !grantedSites.has(pageDomain)) reasons.push({ code: 'routine', text: 'Supervised mode asks before typing' });
+      if (!reasons.length) return true;
+      const shown = sensitiveField ? `${'•'.repeat(Math.min(text.length, 12))} (${text.length} characters, hidden)` : text;
+      const decision = await ask({
+        kind: 'type', reasons: reasons.map((r) => r.text), pageUrl: page.ok ? page.url : String(pageUrl || ''),
+        element: { tag: facts.tag, type: facts.type, text: '', field: [facts.labelText, facts.placeholder, facts.ariaLabel, facts.name, facts.id].filter(Boolean).join(' / '), formAction: facts.formAction },
+        typed: shown,
+        allowSite: !sensitiveField && !submits && !!pageDomain, siteDomain: pageDomain, siteLabel: pageDomain,
+      });
+      if (decision === 'deny') {
+        return sensitiveField
+          ? 'BLOCKED_SENSITIVE: typing into a password, card, one-time-code or other secret field was not approved by the user. Do not retry. Tell the user to enter it themselves.'
+          : GUARD_DENIED_TEXT;
+      }
+      return true;
+    },
+  };
+  return api;
+}
+// --- end ---
 
 // ─── Tab Load Helper ────────────────────────────────────────────────────────
 async function waitForTabLoadComplete(tabId, timeoutMs = 12000) {
@@ -1754,6 +2130,21 @@ async function getPageContext(tabId, includeScreenshot = false) {
   const url = tab?.url || tab?.pendingUrl || '';
   const title = tab?.title || 'Navegador general';
 
+  // --- Autono security: incognito pages are not read unless the user allowed this tab ---
+  if (tab?.incognito && !incognitoApprovedTabs.has(tabId)) {
+    return {
+      screenData: {
+        title: '',
+        url: '',
+        pageContent: '(Incognito tab: Autono does not read incognito pages unless you allow it.)',
+        headings: [],
+        interactiveSummary: { buttons: [], inputs: [] },
+      },
+      screenshotDataUrl: null,
+    };
+  }
+  // --- end ---
+
   // 1. Guard against internal and restricted browser URLs or missing tab
   if (!tabId || isRestrictedUrl(url)) {
     return {
@@ -1880,7 +2271,10 @@ function normalizeAgentSpecs(raw, max = SUBAGENT_LIMITS.maxAgents) {
     if (count) name = `${name} ${count + 1}`;
     const spec = { name, role: clip(item.role || item.persona, 4000), task };
     const url = clip(item.url, 500);
-    if (/^https?:\/\//i.test(url)) spec.url = url;
+    // --- Autono security: agent start url ---
+    const checkedUrl = validateAgentUrl(url);
+    if (checkedUrl.ok && !checkedUrl.needsConfirm) spec.url = checkedUrl.url;
+    // --- end ---
     specs.push(spec);
     if (specs.length >= max) break;
   }
@@ -1986,6 +2380,7 @@ function createLimiter(limit) {
 // Runs the agents from the extension itself: used for direct APIs and when the Bridge has no /agents/run yet
 async function runSubAgentsInExtension(specs, ctx) {
   const { endpointInfo, basePayload, goal, signal, onEvent } = ctx;
+  const helperBudget = { left: Math.max(0, (ctx.maxAgents ?? SUBAGENT_LIMITS.maxAgents) - specs.length) }; // Autono security
   const limit = createLimiter(SUBAGENT_LIMITS.maxConcurrency);
   const usage = { prompt_tokens: 0, completion_tokens: 0 };
   const all = [];
@@ -2047,6 +2442,10 @@ async function runSubAgentsInExtension(specs, ctx) {
       ];
       const first = await callModel(messages);
       let { clean, specs: helpers } = parseSpawnBlocks(first);
+      // --- Autono security: nested helpers are counted against the approved budget (and the "3 helpers" rule) ---
+      helpers = helpers.slice(0, Math.max(0, Math.min(3, helperBudget.left)));
+      helperBudget.left -= helpers.length;
+      // --- end ---
       if (helpers.length && depth < SUBAGENT_LIMITS.maxDepth) {
         const helperResults = await runLevel(helpers, depth + 1, id);
         messages.push(
@@ -2091,7 +2490,7 @@ async function runSubAgentsViaBridge(specs, ctx) {
         stream: true,
         max_concurrency: SUBAGENT_LIMITS.maxConcurrency,
         max_depth: SUBAGENT_LIMITS.maxDepth,
-        max_agents: SUBAGENT_LIMITS.maxAgents,
+        max_agents: ctx.maxAgents ?? SUBAGENT_LIMITS.maxAgents,
         timeout: SUBAGENT_LIMITS.timeoutMs / 1000,
         temperature: basePayload.temperature,
         reasoning_effort: basePayload.reasoning_effort,
@@ -2208,6 +2607,7 @@ const pendingAgentPermissions = new Map();
 
 function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
   if (settings.agentConfirm === false) return Promise.resolve(true);
+  if (taskAgentApprovals.has(taskId)) return Promise.resolve(true); // Autono security: user chose "Allow for this task only"
   const requestId = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve) => {
     let timer = null;
@@ -2219,6 +2619,7 @@ function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
     };
     const onAbort = () => finish(false);
     timer = setTimeout(() => finish(false), 5 * 60 * 1000); // no answer: treat as "no"
+    finish.taskId = taskId; // Autono security: lets the response handler scope "for this task only"
     pendingAgentPermissions.set(requestId, finish);
     if (signal) {
       if (signal.aborted) return finish(false);
@@ -2230,12 +2631,20 @@ function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
       taskId,
       sessionId,
       count: specs.length,
-      agents: specs.map((s) => ({
-        name: s.name,
-        role: String(s.role || '').slice(0, 160),
-        task: String(s.task || '').slice(0, 220),
-        url: s.url || '',
-      })),
+      // --- Autono security: full disclosure of what each agent will do and where it starts ---
+      agents: specs.map((s) => {
+        const startCheck = s.url ? validateAgentUrl(s.url) : null;
+        return {
+          name: s.name,
+          role: String(s.role || '').slice(0, 400),
+          task: String(s.task || '').slice(0, 8000),
+          url: s.url || '',
+          startUrl: startCheck && startCheck.ok ? startCheck.url : 'https://www.google.com/',
+          startOrigin: startCheck && startCheck.ok ? startCheck.origin : 'https://www.google.com',
+        };
+      }),
+      limits: { tabs: Math.min(specs.length, SUBAGENT_LIMITS.maxTabs), stepsPerAgent: 15, usesLoggedInSessions: true, usesBrowser: runningTask?.mode === 'cowork' },
+      // --- end ---
     });
   });
 }
@@ -2278,7 +2687,7 @@ Reply ONLY with a JSON block:
 
 // Each agent drives its own browser tab; the tab is closed when the agent reports back
 async function runTabAgents(specs, ctx) {
-  const { settings, base, modelName, explicitProvider, signal, onEvent, goal, idOffset = 0 } = ctx;
+  const { settings, base, modelName, explicitProvider, signal, onEvent, goal, idOffset = 0, taskId, sessionId } = ctx;
   const endpoint = await resolveInferenceEndpoint(modelName || settings.selectedModel || DEFAULT_MODEL, base, explicitProvider);
   const limit = createLimiter(SUBAGENT_LIMITS.maxTabs);
   const maxSteps = Math.max(4, Math.min(settings.maxSteps || 15, 15));
@@ -2293,8 +2702,14 @@ async function runTabAgents(specs, ctx) {
     const result = { id, name: spec.name, depth: 1, parent: null, status: 'done', text: '', error: '' };
     let tabId = null;
     try {
-      const tab = await chrome.tabs.create({ url: spec.url || 'https://www.google.com', active: false });
+      // --- Autono security: agent containment (url validation, new-site approval) ---
+      const agentGuard = createActionGuard({ taskId, sessionId, settings, signal, startUrls: [spec.url || 'https://www.google.com'], agentName: spec.name, routinePrompts: false });
+      const startNav = await agentGuard.navigate(spec.url || 'https://www.google.com');
+      if (!startNav.ok) throw new Error(startNav.message);
+      // --- end ---
+      const tab = await chrome.tabs.create({ url: startNav.url, active: false });
       tabId = tab.id;
+      if (tab.incognito) throw new Error('Agents do not run in incognito windows.'); // Autono security
       await waitForTabLoadComplete(tabId);
       await triggerWorkOverlay(tabId, true, `Agent: ${spec.name}`).catch(() => null);
       await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
@@ -2303,6 +2718,12 @@ async function runTabAgents(specs, ctx) {
       let final = '';
       for (let step = 1; step <= maxSteps && !signal?.aborted; step++) {
         const { screenData } = await getPageContext(tabId, false);
+        // --- Autono security: origin containment per agent ---
+        if (!(await agentGuard.checkPage(screenData?.url))) {
+          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+          throw new Error('Stopped: the agent reached a site you did not approve.');
+        }
+        // --- end ---
         const prompt = buildTabAgentPrompt(spec, goal, screenData, history, step, maxSteps);
         const res = await fetchInferenceWithFallback(endpoint, {
           model: endpoint.model,
@@ -2331,14 +2752,24 @@ async function runTabAgents(specs, ctx) {
         }
 
         let outcome = 'Success';
-        if (plan.action === 'click') outcome = await executeClickAction(tabId, plan.selector);
-        else if (plan.action === 'type') outcome = await executeTypeAction(tabId, plan.selector, plan.value);
+        if (plan.action === 'click') outcome = await executeClickAction(tabId, plan.selector, agentGuard);
+        else if (plan.action === 'type') outcome = await executeTypeAction(tabId, plan.selector, plan.value, agentGuard);
         else if (plan.action === 'scroll') outcome = await executeScrollAction(tabId, plan.value || 'down');
         else if (plan.action === 'navigate' && plan.value) {
-          await chrome.tabs.update(tabId, { url: plan.value });
-          await waitForTabLoadComplete(tabId);
-          await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
-          outcome = `Navigated to ${plan.value}`;
+          // --- Autono security: validated navigation ---
+          const nav = await agentGuard.navigate(plan.value);
+          outcome = nav.message || '';
+          if (nav.ok) {
+            try {
+              await chrome.tabs.update(tabId, { url: nav.url });
+              await waitForTabLoadComplete(tabId);
+              await chrome.scripting.executeScript({ target: { tabId }, files: ['buildDomTree.js'] }).catch(() => null);
+              outcome = `Navigated to ${nav.url}`;
+            } catch (navErr) {
+              outcome = `Navigation rejected by the browser: ${navErr.message}`;
+            }
+          }
+          // --- end ---
         } else {
           await new Promise((r) => setTimeout(r, 1500));
           outcome = 'Wait completed';
@@ -2720,6 +3151,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
         const runState = { agents: [] };
         publish(settled + agentRunBlock(runState));
         const out = await runSubAgents(specs, {
+          maxAgents: SUBAGENT_LIMITS.maxAgents - (spawnedTotal - specs.length), // Autono security: approved budget, helpers included
           endpointInfo,
           basePayload,
           goal: String(userText || '').replace(/^\s*\/teamwork\b\s*/i, '').slice(0, 1500),
@@ -2732,6 +3164,7 @@ ${screenData.pageContent || '(Page without accessible textual content)'}
         // results the Bridge reports are authoritative for the final card
         for (const r of out.results) applyAgentEvent(runState, { type: 'agent_done', ...r });
         settled += agentRunBlock(runState) + '\n\n';
+        spawnedTotal += out.results.filter((r) => (r.depth || 1) > 1).length; // Autono security: nested helpers use the same budget
         totals.inputTokens += out.usage.prompt_tokens || 0;
         totals.outputTokens += out.usage.completion_tokens || 0;
 
@@ -2874,6 +3307,20 @@ async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId, t
       });
       return;
     }
+
+    // --- Autono security: task guard (approvals, origin containment) and incognito consent ---
+    const guard = createActionGuard({ taskId, sessionId, settings, signal: abortController.signal, startUrls: [tabInfo?.url] });
+    if (tabInfo?.incognito && !incognitoApprovedTabs.has(tabId)) {
+      const incognitoAnswer = await requestActionApproval(taskId, sessionId, {
+        kind: 'incognito',
+        reasons: ['This is an incognito tab. Autono would read its content and send it to the model.'],
+        pageUrl: tabInfo.url,
+        allowSite: false,
+      }, abortController.signal);
+      if (incognitoAnswer === 'deny') throw new Error('Cowork stopped: you did not allow Autono to work in an incognito tab.');
+      incognitoApprovedTabs.add(tabId);
+    }
+    // --- end ---
 
     // Inject buildDomTree.js on the tab
     await chrome.scripting.executeScript({
@@ -3064,6 +3511,13 @@ Allowed values for "icon": "search", "file-text", "brain", "terminal", "code", "
         runningTask.lastKnownUrl = screenData.url;
       }
 
+      // --- Autono security: origin containment (covers redirects and clicks that navigated) ---
+      if (!(await guard.checkPage(screenData?.url))) {
+        if (abortController.signal.aborted) break;
+        throw new Error(`Cowork stopped: the task moved to a site you did not approve (${String(screenData?.url || '').slice(0, 120)}).`);
+      }
+      // --- end ---
+
       // 2. Check for real-time user interventions
       let userInterventionPrompt = '';
       if (runningTask.pendingInterventions && runningTask.pendingInterventions.length > 0) {
@@ -3136,19 +3590,29 @@ You MUST reply ONLY with a JSON block with this strict format:
         completed = true;
         summary = stepPlan.thought || stepPlan.description || 'Task completed successfully.';
       } else if (stepPlan.action === 'click') {
-        actionResult = await executeClickAction(tabId, stepPlan.selector);
+        actionResult = await executeClickAction(tabId, stepPlan.selector, guard);
       } else if (stepPlan.action === 'type') {
-        actionResult = await executeTypeAction(tabId, stepPlan.selector, stepPlan.value);
+        actionResult = await executeTypeAction(tabId, stepPlan.selector, stepPlan.value, guard);
       } else if (stepPlan.action === 'scroll') {
         actionResult = await executeScrollAction(tabId, stepPlan.value || 'down');
       } else if (stepPlan.action === 'navigate') {
-        await chrome.tabs.update(tabId, { url: stepPlan.value });
-        await new Promise(r => {
-          runningTask.stepWaitResolver = r;
-          setTimeout(r, 2000);
-        });
-        runningTask.stepWaitResolver = null;
-        actionResult = `Navigated to ${stepPlan.value}`;
+        // --- Autono security: validated, approved navigation ---
+        const navCheck = await guard.navigate(stepPlan.value);
+        actionResult = navCheck.message || '';
+        if (navCheck.ok) {
+          try {
+            await chrome.tabs.update(tabId, { url: navCheck.url });
+            await new Promise(r => {
+              runningTask.stepWaitResolver = r;
+              setTimeout(r, 2000);
+            });
+            runningTask.stepWaitResolver = null;
+            actionResult = `Navigated to ${navCheck.url}`;
+          } catch (navErr) {
+            actionResult = `Navigation rejected by the browser: ${navErr.message}`;
+          }
+        }
+        // --- end ---
       } else if (stepPlan.action === 'spawn_agents') {
         if (!multiAgentOn) {
           actionResult = 'Sub-agents are not enabled for this run. Do the work yourself.';
@@ -3161,7 +3625,7 @@ You MUST reply ONLY with a JSON block with this strict format:
           } else {
             agentBudget -= requested.length;
             const out = await runTabAgents(requested, {
-              settings, base, modelName, explicitProvider,
+              settings, base, modelName, explicitProvider, taskId, sessionId,
               signal: abortController.signal,
               goal: goalText,
               idOffset: agentState.agents.length,
@@ -3424,15 +3888,25 @@ ${summary ? `> ${summary}\n` : ''}
 }
 
 // Action execution helpers (SiteLegend + Browserius / Browser-use Multi-Strategy Engine)
-async function executeClickAction(tabId, target) {
+async function executeClickAction(tabId, target, guard = null, _probe = false) {
   try {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (isRestrictedUrl(tab?.url)) {
       return 'Action omitted: not permitted on internal Chrome pages';
     }
+    // --- Autono security: resolve the element and show the user its real text/href before acting ---
+    let expectFacts = null;
+    if (guard && !_probe) {
+      const probed = await executeClickAction(tabId, target, null, true);
+      if (!probed || typeof probed !== 'object') return String(probed || 'Element not found');
+      const verdict = await guard.beforeClick(probed, tab?.url);
+      if (verdict !== true) return verdict;
+      expectFacts = probed;
+    }
+    // --- end ---
     const execResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (targetSelector) => {
+      func: (targetSelector, probeOnly, expect) => {
         function findInteractiveElement(target, isInputOnly = false) {
           if (!target && !isInputOnly) return null;
           const rawTarget = String(target || '').trim();
@@ -3579,6 +4053,29 @@ async function executeClickAction(tabId, target) {
           return `Element not found: "${targetSelector}". Continuing with an alternative action.`;
         }
 
+        // --- Autono security: element facts for the approval card (computed here, never from the model) ---
+        const __ga = (x, n) => { try { return Element.prototype.getAttribute.call(x, n) || ''; } catch (e) { return ''; } };
+        const __abs = (v) => { try { return v ? new URL(v, document.baseURI).href : ''; } catch (e) { return ''; } };
+        const __a = Element.prototype.closest.call(el, 'a[href]');
+        const __form = el.form || Element.prototype.closest.call(el, 'form');
+        const __ty = __ga(el, 'type').toLowerCase();
+        const __tag = String(el.tagName || '').toLowerCase();
+        const __facts = {
+          tag: __tag,
+          type: __ty,
+          text: String(el.innerText || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+          ariaLabel: __ga(el, 'aria-label').slice(0, 200),
+          title: __ga(el, 'title').slice(0, 200),
+          href: __a ? __abs(__ga(__a, 'href')) : '',
+          formAction: __form ? __abs(__ga(el, 'formaction') || __ga(__form, 'action') || document.location.href) : '',
+          isSubmit: !!__form && (__ty === 'submit' || __ty === 'image' || (__tag === 'button' && __ty === '')),
+        };
+        if (probeOnly) return __facts;
+        if (expect && (expect.tag !== __facts.tag || expect.text !== __facts.text || expect.href !== __facts.href || expect.formAction !== __facts.formAction)) {
+          return 'Action cancelled: the element changed after it was shown to the user. Try again.';
+        }
+        // --- end ---
+
         el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
 
         // Highlight ring animation for visual feedback
@@ -3616,7 +4113,7 @@ async function executeClickAction(tabId, target) {
         const label = el.innerText || el.value || el.getAttribute('placeholder') || el.getAttribute('aria-label') || targetSelector;
         return `Click performed on "${(label || targetSelector).slice(0, 45)}"`;
       },
-      args: [target],
+      args: [target, !!_probe, expectFacts],
     }).catch(e => [{ result: `Click failed: ${e.message}` }]);
 
     const res = execResults?.[0];
@@ -3626,15 +4123,25 @@ async function executeClickAction(tabId, target) {
   }
 }
 
-async function executeTypeAction(tabId, target, value) {
+async function executeTypeAction(tabId, target, value, guard = null, _probe = false) {
   try {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (isRestrictedUrl(tab?.url)) {
       return 'Action omitted: not permitted on internal Chrome pages';
     }
+    // --- Autono security: resolve the field and show the user what will be typed before acting ---
+    let expectFacts = null;
+    if (guard && !_probe) {
+      const probed = await executeTypeAction(tabId, target, value, null, true);
+      if (!probed || typeof probed !== 'object') return String(probed || 'Text field not found');
+      const verdict = await guard.beforeType(probed, value, tab?.url);
+      if (verdict !== true) return verdict;
+      expectFacts = probed;
+    }
+    // --- end ---
     const execResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: async (targetSelector, textToType) => {
+      func: async (targetSelector, textToType, probeOnly, expect) => {
         function findInteractiveElement(target, isInputOnly = true) {
           if (!target && !isInputOnly) return null;
           const rawTarget = String(target || '').trim();
@@ -3748,6 +4255,32 @@ async function executeTypeAction(tabId, target, value) {
           return `Text field not found: "${targetSelector}". Continuing with another action.`;
         }
 
+        // --- Autono security: field facts for the approval card and the sensitive-field check ---
+        const __ga = (x, n) => { try { return Element.prototype.getAttribute.call(x, n) || ''; } catch (e) { return ''; } };
+        const __abs = (v) => { try { return v ? new URL(v, document.baseURI).href : ''; } catch (e) { return ''; } };
+        const __form = el.form || Element.prototype.closest.call(el, 'form');
+        let __label = null;
+        try {
+          const __id = __ga(el, 'id');
+          __label = (__id && document.querySelector('label[for="' + CSS.escape(__id) + '"]')) || Element.prototype.closest.call(el, 'label');
+        } catch (e) {}
+        const __facts = {
+          tag: String(el.tagName || '').toLowerCase(),
+          type: __ga(el, 'type').toLowerCase(),
+          name: __ga(el, 'name').slice(0, 120),
+          id: __ga(el, 'id').slice(0, 120),
+          autocomplete: __ga(el, 'autocomplete').toLowerCase().slice(0, 120),
+          placeholder: __ga(el, 'placeholder').slice(0, 120),
+          ariaLabel: __ga(el, 'aria-label').slice(0, 120),
+          labelText: __label ? String(__label.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) : '',
+          formAction: __form ? __abs(__ga(__form, 'action') || document.location.href) : '',
+        };
+        if (probeOnly) return __facts;
+        if (expect && (expect.tag !== __facts.tag || expect.type !== __facts.type || expect.name !== __facts.name || expect.id !== __facts.id)) {
+          return 'Action cancelled: the field changed after it was shown to the user. Try again.';
+        }
+        // --- end ---
+
         el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
         el.focus();
         if (typeof el.select === 'function') {
@@ -3850,7 +4383,7 @@ async function executeTypeAction(tabId, target, value) {
         const label = el.getAttribute('placeholder') || el.getAttribute('name') || el.id || targetSelector;
         return `Typed text in field "${label}": "${cleanText.slice(0, 30)}"`;
       },
-      args: [target, value || ''],
+      args: [target, value || '', !!_probe, expectFacts],
     }).catch(e => [{ result: `Typing failed: ${e.message}` }]);
 
     const res = execResults?.[0];
@@ -3998,7 +4531,12 @@ async function handleMcpAction(actionItem, bridgeUrl) {
       case 'browser_navigate': {
         let destUrl = params?.url || '';
         if (!destUrl) throw new Error('Missing url parameter');
-        if (!/^https?:\/\//i.test(destUrl)) destUrl = 'https://' + destUrl;
+        // --- Autono security: validated navigation (the MCP bridge has no approval card, so local targets are refused) ---
+        const mcpNav = validateAgentUrl(String(destUrl), { assumeHttps: true, blockedOrigins: agentInternalOrigins(await getSettings()) });
+        if (!mcpNav.ok) throw new Error(`Navigation blocked: ${mcpNav.error}`);
+        if (mcpNav.needsConfirm) throw new Error(`Navigation blocked: ${mcpNav.needsConfirm.reason}. Local and internal addresses need approval in the side panel.`);
+        destUrl = mcpNav.url;
+        // --- end ---
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (tab?.id) {
           await chrome.tabs.update(tab.id, { url: destUrl });
@@ -4364,8 +4902,28 @@ chrome.runtime.onConnect.addListener((port) => {
 
           case 'agent_permission_response': {
             const resolveFn = pendingAgentPermissions.get(msg.requestId);
-            if (resolveFn) resolveFn(Boolean(msg.allow));
+            if (resolveFn) {
+              // --- Autono security: "Allow for this task only" replaces the global "don't ask again" ---
+              if (msg.allow && msg.forTask && resolveFn.taskId) taskAgentApprovals.add(resolveFn.taskId);
+              // --- end ---
+              resolveFn(Boolean(msg.allow));
+            }
             break;
+          }
+
+          case 'action_permission_response': {
+            // --- Autono security: answer to an action approval card (extension pages only) ---
+            if (!isExtPage(port.sender)) break;
+            const entry = pendingActionPermissions.get(String(msg.requestId || ''));
+            if (!entry) break;
+            const decision = ['once', 'site', 'deny', 'stop'].includes(msg.decision) ? msg.decision : 'deny';
+            if (decision === 'stop' && runningTask && runningTask.taskId === entry.taskId && runningTask.abortController) {
+              runningTask.abortController.abort();
+              if (typeof runningTask.stepWaitResolver === 'function') runningTask.stepWaitResolver('aborted');
+            }
+            entry.finish(decision);
+            break;
+            // --- end ---
           }
 
           case 'save_settings': {

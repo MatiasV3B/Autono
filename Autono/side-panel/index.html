@@ -725,6 +725,7 @@
                     <option value="semi">Semi-Autonomous</option>
                     <option value="full">Full Autonomy (Direct execution)</option>
                   </select>
+                  <span class="field-hint">Supervised: asks before every navigation, click and typing. Semi-Autonomous and Full: ask only for sensitive actions (new sites, forms, payments and sends, passwords, sensitive sites). Sensitive actions always ask in every level.</span>
                 </div>
 
                 <div class="setting-field-toggle">
@@ -1224,6 +1225,17 @@
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="settingAgentConfirm" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Allow running code from answers</span>
+                    <span class="toggle-desc"><strong>Warning:</strong> shows a Run button on code blocks. Code runs on your computer through the Bridge with your user permissions. Each run asks you to confirm after showing the full code. Off by default.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingAllowCodeExecution">
                     <span class="slider-toggle"></span>
                   </label>
                 </div>

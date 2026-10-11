@@ -114,7 +114,7 @@
         // Check for sensitive fields to prevent credential and PII leakage
         const isPassword = type === 'password';
         const autocomplete = (inp.getAttribute('autocomplete') || '').toLowerCase();
-        const isSensitivePattern = /(password|passwd|pwd|passcode|token|secret|pin|cvv|cvc|creditcard|cardnumber|ssn|auth)/i.test(`${name} ${placeholder} ${ariaLabel}`);
+        const isSensitivePattern = /(password|passwd|pwd|passcode|token|secret|pin|cvv|cvc|creditcard|cardnumber|ssn|auth|one-time-code|otp|verification|iban|account|routing|dob|security)/i.test(`${name} ${placeholder} ${ariaLabel} ${autocomplete}`); // Autono security: wider masking
         const isSensitive = isPassword || autocomplete.includes('password') || autocomplete.includes('cc-') || isSensitivePattern;
 
         let safeValue = '';
