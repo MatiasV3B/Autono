@@ -68,7 +68,7 @@
   ],
   "options_page": "options/options.html",
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://www.google.com https://*.gstatic.com; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:* https:"
   },
   "cross_origin_embedder_policy": {
     "value": "require-corp"
