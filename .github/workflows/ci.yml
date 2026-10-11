@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO: pin third-party actions by full commit SHA (look up the SHA of the release tag on GitHub).
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Manifest is valid JSON with required keys
+        working-directory: Autono
+        run: |
+          node -e "
+            const m = JSON.parse(require('fs').readFileSync('manifest.json', 'utf8'));
+            if (m.manifest_version !== 3) throw new Error('manifest_version must be 3');
+            if (!m.minimum_chrome_version) throw new Error('minimum_chrome_version missing');
+            if (m.incognito !== 'not_allowed') throw new Error('incognito must be not_allowed');
+            console.log('manifest ok, version', m.version);
+          "
+
+      - name: JavaScript syntax
+        working-directory: Autono
+        run: |
+          set -e
+          for f in background.js buildDomTree.js domExtractor.js content/*.js lib/*.js options/*.js side-panel/*.js scripts/*.js; do
+            node --check "$f"
+          done
+
+      - name: Vendored files match pinned hashes
+        working-directory: Autono
+        run: node scripts/verify-vendor.js
+
+      - name: Static security checks (CSP / dynamic code / permissions)
+        working-directory: Autono
+        run: npm run check
+
+      - name: Build package from allowlist
+        working-directory: Autono
+        run: |
+          node scripts/build-dist.js --out "$RUNNER_TEMP/dist"
+          cat "$RUNNER_TEMP/dist/SHA256SUMS" | tail -n 3
+
+      - name: Secret scan (inline; no third-party action)
+        run: |
+          # TODO: replace with gitleaks/gitleaks-action pinned to a full commit SHA.
+          set -u
+          pattern='(AIza[0-9A-Za-z_-]{35}|sk-ant-[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16})'
+          if git grep -nIE "$pattern" -- . ':(exclude)Autono/package-lock.json' ':(exclude)Autono/vendor' ':(exclude)Autono/side-panel/vendor'; then
+            echo "Possible secret committed (see matches above)." >&2
+            exit 1
+          fi
+          echo "no secret patterns found"
