@@ -30,10 +30,15 @@
     walk: { w: 84, h: 66, box: [0, 0, 84, 66], scale: 1 },
     look: { w: 84, h: 72, box: [0, 0, 84, 72], scale: 1 },
     jump: { w: 84, h: 135, box: [0, 0, 84, 135], scale: 1 },
+    // cut from the coffee video (one art pixel is 6 px there, so it is scaled up to match)
+    coffee: { w: 90, h: 57, box: [0, 0, 90, 57], scale: 1.25 },
+    // cut from the nap video (same 6 px art pixel): asleep, and waking up with a wave
+    sleeping: { w: 76, h: 73, box: [0, 0, 76, 73], scale: 1.25 },
+    wave: { w: 76, h: 67, box: [0, 0, 76, 67], scale: 1.25 },
   };
 
   // How long one loop of each animation lasts (ms); used to take turns between animations
-  const DUR = { bubble: 2300, coding: 3650, dancing: 1700, fire: 4410, soccer: 4510, thinking: 2500, waiting: 700, working: 1500, lightbulb: 1100, look: 3150, jump: 1860, reading_in: 3070, reading: 990, debugging_in: 2730, debugging: 1320 };
+  const DUR = { bubble: 2300, coding: 3650, dancing: 1700, fire: 4410, soccer: 4510, thinking: 2500, waiting: 700, working: 1500, lightbulb: 1100, look: 3150, jump: 1860, reading_in: 3070, reading: 990, debugging_in: 2730, debugging: 1320, coffee: 3000, sleeping: 1600, wave: 2050 };
 
   // state -> animation(s) + short text (red tone for errors). seq = [animation, loops] pairs that take
   // turns; loops 0 means "stay on this one and keep looping it".
@@ -49,10 +54,10 @@
     agents: { seq: [['working', 3], ['soccer', 1]], en: 'Agents at work', es: 'Agentes trabajando' },
     retry: { seq: [['lightbulb', 0]], en: 'Trying again…', es: 'Reintentando…' },
     waiting: { seq: [['waiting', 0]], en: 'Needs your OK', es: 'Necesito tu permiso', sticky: true }, // the clock
-    waiting_long: { seq: [['waiting', 0]], en: 'Still waiting for you', es: 'Sigo esperándote', sticky: true },
+    waiting_long: { seq: [['coffee', 2], ['sleeping', 0]], en: 'Still waiting for you', es: 'Sigo esperándote', sticky: true },
     done: { seq: [['jump', 0]], en: 'Finished! Click for a /btw', es: '¡Terminé! Clic para un /btw', sticky: true }, // jumping, on repeat
     error: { seq: [['fire', 0]], en: 'It got stuck', es: 'Se trabó', sticky: true, tone: 'error' }, // the lit fuse
-    idle: { seq: [['dancing', 2], ['soccer', 1], ['bubble', 1]], en: 'Hi! Ask me a /btw', es: '¡Hola! Pregúntame un /btw' },
+    idle: { seq: [['wave', 2], ['dancing', 2], ['soccer', 1], ['bubble', 1], ['coffee', 1]], en: 'Hi! Ask me a /btw', es: '¡Hola! Pregúntame un /btw' },
   };
 
   const T = {
