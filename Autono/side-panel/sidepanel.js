@@ -4295,6 +4295,9 @@ marked.use({
       return;
     }
 
+    // Autono security: ask for page access on first use (inside this click/Enter gesture), not at install
+    if (!text.startsWith('/btw')) await ensureSiteAccess();
+
     // Direct /btw sidecar shortcut handling
     if (text.startsWith('/btw')) {
       const sideQuestion = text.replace(/^\/btw\s*/i, '').trim();
@@ -6218,6 +6221,8 @@ marked.use({
         });
       }
 
+      ensureOriginAccess(baseUrl); // Autono security: the provider's own origin, requested from this click
+
       const newProvider = {
         id: provId,
         name,
@@ -6305,6 +6310,7 @@ marked.use({
     if (autonomyInput && s.autonomyMode) autonomyInput.value = s.autonomyMode;
     // --- Autono security: code execution is off unless the user turned it on ---
     allowCodeExecutionEnabled = s.allowCodeExecution === true;
+    refreshSiteAccessUi();
     const allowCodeInput = settingEl('settingAllowCodeExecution');
     if (allowCodeInput) allowCodeInput.checked = allowCodeExecutionEnabled;
     // --- end ---
@@ -9089,6 +9095,65 @@ You are a world-class principal software engineer.
     URL.revokeObjectURL(url);
     showToast(`✓ Word document downloaded: ${a.download}`);
   }
+
+  // --- Autono security: page access (<all_urls>) is an optional permission requested at first use ---
+  const SITE_ACCESS = { origins: ['<all_urls>'] };
+  let siteAccessDeclined = false;
+  async function hasSiteAccess() {
+    try { return await chrome.permissions.contains(SITE_ACCESS); } catch (_) { return false; }
+  }
+  // Must run inside a user gesture (a click or Enter in this page): it is called at the top of handleSend
+  async function ensureSiteAccess() {
+    if (siteAccessDeclined || (await hasSiteAccess())) return;
+    let granted = false;
+    try { granted = await chrome.permissions.request(SITE_ACCESS); } catch (_) { granted = false; }
+    if (!granted) {
+      siteAccessDeclined = true;
+      showToast('Page access was not granted: Autono will not read pages or act on them. You can grant it in Settings.');
+    }
+    refreshSiteAccessUi();
+  }
+  // Other servers (a custom provider or a remote Bridge) need their own permission to be reachable from here
+  function ensureOriginAccess(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return;
+      const h = u.hostname;
+      if (h === '127.0.0.1' || h === 'localhost' || h === '[::1]') return;
+      chrome.permissions.request({ origins: [u.origin + '/*'] }).catch(() => null);
+    } catch (_) { /* invalid URL: validation happens elsewhere */ }
+  }
+  async function refreshSiteAccessUi() {
+    const status = settingEl('siteAccessStatus');
+    const grantBtn = settingEl('siteAccessGrantBtn');
+    const revokeBtn = settingEl('siteAccessRevokeBtn');
+    if (!status) return;
+    const has = await hasSiteAccess();
+    status.textContent = has ? 'Granted: Autono can read and act on the pages you ask it about.' : 'Not granted: Autono cannot read pages until you allow it.';
+    if (grantBtn) grantBtn.classList.toggle('hidden', has);
+    if (revokeBtn) revokeBtn.classList.toggle('hidden', !has);
+  }
+  function wireSiteAccessUi() {
+    const grantBtn = settingEl('siteAccessGrantBtn');
+    const revokeBtn = settingEl('siteAccessRevokeBtn');
+    if (grantBtn) grantBtn.addEventListener('click', async () => {
+      siteAccessDeclined = false;
+      try { await chrome.permissions.request(SITE_ACCESS); } catch (_) { /* declined */ }
+      refreshSiteAccessUi();
+    });
+    if (revokeBtn) revokeBtn.addEventListener('click', async () => {
+      try { await chrome.permissions.remove(SITE_ACCESS); } catch (_) { /* nothing to remove */ }
+      siteAccessDeclined = true;
+      refreshSiteAccessUi();
+    });
+    try {
+      chrome.permissions.onAdded.addListener(refreshSiteAccessUi);
+      chrome.permissions.onRemoved.addListener(refreshSiteAccessUi);
+    } catch (_) { /* older Chrome */ }
+    refreshSiteAccessUi();
+  }
+  wireSiteAccessUi();
+  // --- end ---
 
   // --- Autono security: per-run confirmation that shows the full code ---
   function confirmCodeRun(lang, code, tainted = true) {

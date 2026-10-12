@@ -49,9 +49,12 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "<all_urls>",
     "http://127.0.0.1:*/*",
-    "http://localhost:*/*"
+    "http://localhost:*/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://api.search.tinyfish.ai/*"
   ],
   "options_page": "options/options.html",
   "content_security_policy": {
@@ -73,5 +76,8 @@
         "https://*/*"
       ]
     }
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ]
 }

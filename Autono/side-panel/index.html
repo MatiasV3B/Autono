@@ -1275,6 +1275,16 @@
 
                 <div class="setting-field-toggle">
                   <div class="toggle-text">
+                    <span class="toggle-title">Page access</span>
+                    <span class="toggle-desc">Autono asks for access to the sites you use it on the first time you send a message. <span id="siteAccessStatus"></span></span>
+                  </div>
+                  <div>
+                    <button type="button" class="agent-perm-btn allow hidden" id="siteAccessGrantBtn">Allow</button>
+                    <button type="button" class="agent-perm-btn hidden" id="siteAccessRevokeBtn">Revoke</button>
+                  </div>
+                </div>
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
                     <span class="toggle-title">Allow running code from answers</span>
                     <span class="toggle-desc"><strong>Warning:</strong> shows a Run button on code blocks. Code runs on your computer through the Bridge with your user permissions. Each run asks you to confirm after showing the full code. Off by default.</span>
                   </div>

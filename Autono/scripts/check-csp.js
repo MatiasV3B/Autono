@@ -26,7 +26,7 @@ const ALLOWED_PERMISSIONS = {
   contextMenus: 'right-click entries',
 };
 const ALLOWED_HOSTS = {
-  '<all_urls>': 'page access for the agent; move to optional_host_permissions (audit M3)',
+  '<all_urls>': 'page access for the agent (optional: requested at first use)',
   'http://127.0.0.1:*/*': 'local Bridge',
   'http://localhost:*/*': 'local Bridge',
   'https://generativelanguage.googleapis.com/*': 'Gemini API',
@@ -105,6 +105,7 @@ for (const w of manifest.web_accessible_resources || []) {
   for (const r of w.resources || []) if (r === '*' || r === 'assets/*' || /\.js$/.test(r)) mv(`web_accessible_resources exposes "${r}"`);
   if ((w.matches || []).includes('<all_urls>')) mv('web_accessible_resources matches <all_urls>');
 }
+if ((manifest.host_permissions || []).includes('<all_urls>')) mv('<all_urls> must be an optional host permission, not a static one');
 const cs = manifest.content_scripts || [];
 if (cs.length) console.log(`[note] manifest declares ${cs.length} static content_scripts block(s) (audit M2: replace with on-demand injection)`);
 

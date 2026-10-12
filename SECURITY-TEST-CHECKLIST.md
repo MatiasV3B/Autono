@@ -59,6 +59,14 @@ Note: local addresses always ask for approval, so also test once against a norma
 - [ ] Right-click "Ask Autono" on selected text attaches the selection as a chip in the panel.
 - [ ] Skills whose mode is Cowork/Chat switch the mode; the scratchpad insert resizes the prompt box (no console ReferenceError).
 
+## 3c. Page access is optional
+- [ ] chrome://extensions details: "Site access" is not "all sites" right after install.
+- [ ] First message you send (chat or Cowork) shows Chrome's permission prompt; allowing it makes page reading work.
+- [ ] Declining shows a toast and the answer does not use the page; Settings > Page access shows "Not granted" and Allow works.
+- [ ] Revoke in Settings removes the permission and the next send does not re-prompt until you click Allow.
+- [ ] Adding a custom provider on another host prompts for that origin only.
+- [ ] A Cowork task started from the Bridge/MCP (no click in the panel) with no page access fails with a clear error instead of hanging.
+
 ## 4. Manifest and build
 - [ ] chrome://extensions shows no "webNavigation"/"notifications" warnings; extension not available in incognito.
 - [ ] `cd Autono && npm run test:unit` passes (sender gates, settings whitelist, URL validation, sanitiser).
