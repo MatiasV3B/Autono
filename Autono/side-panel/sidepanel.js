@@ -1039,6 +1039,10 @@ marked.use({
       case 'quota_update':
         break;
 
+      case 'CONTEXT_MENU_ASK_ANTIGRAVITY':
+        handleContextMenuAsk(msg);
+        break;
+
       case 'external_user_message':
         if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         createMessageRow('user', msg.text || '');
@@ -3942,8 +3946,9 @@ marked.use({
     micBtn.addEventListener('click', () => (dictating ? stopDictation() : startDictation()));
   }
 
-  toggleCoworkBtn.addEventListener('click', () => {
-    isCoworkActive = !isCoworkActive;
+  // Switches Chat <-> Cowork (also used by skills whose mode differs from the current one)
+  function toggleCoworkMode(on) {
+    isCoworkActive = typeof on === 'boolean' ? on : !isCoworkActive;
     toggleCoworkBtn.classList.toggle('active', isCoworkActive);
     if (isCoworkActive) {
       promptInput.placeholder = 'Asigna una meta para que el agente la realice en el navegador...';
@@ -3951,7 +3956,13 @@ marked.use({
     } else {
       promptInput.placeholder = 'Envía un mensaje a Antigravity...';
     }
-  });
+  }
+
+  function autoResizePrompt() {
+    handleInputStateChange();
+  }
+
+  toggleCoworkBtn.addEventListener('click', () => toggleCoworkMode());
 
   // ─── Toast Notice Helper ───────────────────────────────────────────────────
   function showToast(message, duration = 4000) {
@@ -10242,6 +10253,29 @@ You are a world-class principal software engineer.
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   }
 
+  // Autono: the right-click 'Ask Autono' action (the background sends it over the panel port)
+  function handleContextMenuAsk(msg) {
+    if (promptInput) {
+      promptInput.focus();
+      if (msg.selectionText) {
+        const previewName = msg.selectionText.length > 25 ? msg.selectionText.slice(0, 22) + '...' : msg.selectionText;
+        addAttachedItem({
+          type: 'fragment',
+          name: `Selección: "${previewName}"`,
+          content: `Texto seleccionado de ${msg.pageTitle || msg.pageUrl || 'la página'}:\nURL: ${msg.pageUrl || ''}\n\n"${msg.selectionText}"`,
+          url: msg.pageUrl,
+          title: msg.pageTitle,
+        });
+        promptInput.value = '';
+        promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
+        handleInputStateChange();
+        showToast('Texto seleccionado adjuntado como contexto');
+      } else if (msg.pageTitle) {
+        promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
+      }
+    }
+  }
+
   // ─── Direct Runtime Message Listener for Panel Close & Context Menu ────────
   chrome.runtime.onMessage.addListener((msg, sender) => {
     // Only the extension's own pages / worker may drive the panel (never a content script on a web page)
@@ -10249,25 +10283,7 @@ You are a world-class principal software engineer.
     if (msg?.type === 'close_side_panel') {
       window.close();
     } else if (msg?.type === 'CONTEXT_MENU_ASK_ANTIGRAVITY') {
-      if (promptInput) {
-        promptInput.focus();
-        if (msg.selectionText) {
-          const previewName = msg.selectionText.length > 25 ? msg.selectionText.slice(0, 22) + '...' : msg.selectionText;
-          addAttachedItem({
-            type: 'fragment',
-            name: `Selección: "${previewName}"`,
-            content: `Texto seleccionado de ${msg.pageTitle || msg.pageUrl || 'la página'}:\nURL: ${msg.pageUrl || ''}\n\n"${msg.selectionText}"`,
-            url: msg.pageUrl,
-            title: msg.pageTitle,
-          });
-          promptInput.value = '';
-          promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
-          handleInputStateChange();
-          showToast('Texto seleccionado adjuntado como contexto');
-        } else if (msg.pageTitle) {
-          promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
-        }
-      }
+      handleContextMenuAsk(msg);
     }
   });
 

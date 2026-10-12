@@ -37,18 +37,6 @@
   "side_panel": {
     "default_path": "side-panel/index.html"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content/content.js",
-        "content/mascot.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "permissions": [
     "storage",
     "activeTab",

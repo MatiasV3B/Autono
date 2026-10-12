@@ -46,6 +46,10 @@ jobs:
         working-directory: Autono
         run: npm run check
 
+      - name: Unit tests (sender gates, settings whitelist, URL validation, sanitiser)
+        working-directory: Autono
+        run: npm run test:unit
+
       - name: Build package from allowlist
         working-directory: Autono
         run: |

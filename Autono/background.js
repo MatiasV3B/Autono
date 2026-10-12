@@ -921,10 +921,18 @@ async function triggerWorkOverlay(tabId, show = true, title = 'Antigravity is wo
     const settings = await getSettings();
     if (!settings.workingOverlay && show) return;
     const cleanTitle = (title || 'Antigravity is working').replace(/^Code:\s*/i, '');
-    await chrome.tabs.sendMessage(tabId, {
+    const overlayMsg = {
       type: show ? 'SHOW_WORK_OVERLAY' : 'HIDE_WORK_OVERLAY',
       title: cleanTitle
-    }).catch(() => null);
+    };
+    // --- Autono security: content.js is no longer injected on every page; it is injected here, on demand ---
+    let delivered = true;
+    await chrome.tabs.sendMessage(tabId, overlayMsg).catch(() => { delivered = false; });
+    if (!delivered && show) {
+      const injected = await chrome.scripting.executeScript({ target: { tabId }, files: ['content/content.js'] }).then(() => true).catch(() => false);
+      if (injected) await chrome.tabs.sendMessage(tabId, overlayMsg).catch(() => null);
+    }
+    // --- end ---
   } catch (err) {
     console.warn('Work overlay trigger error:', err);
   }

@@ -50,10 +50,20 @@ Note: local addresses always ask for approval, so also test once against a norma
 - [ ] Update UI shows version/commit and a confirmation before applying; no forced check on every open.
 - [ ] Bridge in a mode that needs keys: "Send API keys to the local Bridge" works only when enabled.
 
+## 3b. On-demand content scripts (removed from every page)
+- [ ] A normal page you never used Autono on has no `__antigravityContentLoaded` and no `__autono_mascot_host` in the console.
+- [ ] Start a Cowork run: the overlay (pause/stop banner) appears on the task tab and again after each navigation.
+- [ ] Task finishes: the mascot appears on the active tab and a click opens the side panel.
+- [ ] The element picker still works on a page that had no content script.
+- [ ] Typing "0" and "9" quickly in an OTP/phone field keeps both digits (the 09/90 chord is gone; Alt+Shift+A opens the panel).
+- [ ] Right-click "Ask Autono" on selected text attaches the selection as a chip in the panel.
+- [ ] Skills whose mode is Cowork/Chat switch the mode; the scratchpad insert resizes the prompt box (no console ReferenceError).
+
 ## 4. Manifest and build
 - [ ] chrome://extensions shows no "webNavigation"/"notifications" warnings; extension not available in incognito.
+- [ ] `cd Autono && npm run test:unit` passes (sender gates, settings whitelist, URL validation, sanitiser).
 - [ ] `cd Autono && node scripts/check-csp.js` exits 0; `node scripts/verify-vendor.js` OK; `node scripts/build-dist.js --tmp` succeeds.
 - [ ] `npm install --package-lock-only` then `npm ci` works.
 
 ## Known gaps (not bugs in this check)
-Static content scripts / `tabs` / `unlimitedStorage` / `<all_urls>` still declared; API keys still reach the panel via `init_state`; `options.js` has no URL validation of its own; Bridge-side controls (token, Origin/Host, sandbox, signed updates) are not in this repo.
+`tabs` / `unlimitedStorage` / `<all_urls>` still declared (static content scripts are gone); API keys still reach the panel via `init_state`; `options.js` has no URL validation of its own; Bridge-side controls (token, Origin/Host, sandbox, signed updates) are not in this repo.

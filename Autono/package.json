@@ -11,8 +11,9 @@
     "build": "node scripts/build-dist.js",
     "build:dist": "node scripts/build-dist.js",
     "check": "node scripts/check-csp.js && node scripts/verify-vendor.js",
-    "test": "npm run check && node scripts/build-dist.js --tmp",
-    "verify:vendor": "node scripts/verify-vendor.js"
+    "test": "npm run check && node scripts/build-dist.js --tmp && npm run test:unit",
+    "verify:vendor": "node scripts/verify-vendor.js",
+    "test:unit": "node ../tests/security.test.js && node ../tests/security-sprint2.test.js && node ../tests/background-gates.test.js && node tests/autono-security.test.cjs"
   },
   "dependencies": {},
   "devDependencies": {
