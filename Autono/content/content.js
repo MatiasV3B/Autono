@@ -17,13 +17,14 @@
   // ─── Agent Working Shield / Debug Overlay ──────────────────────────────────
   let workOverlay = null;
   let workFrame = null;
+  let workLabel = null; // lives inside a closed shadow root, so it is kept by reference (not by id lookup)
   let isWorkPaused = false;
 
   // Intercept user manual clicks during active work without blocking programmatic actions
   function onUserManualIntervention(e) {
     if (!workOverlay || isWorkPaused) return;
-    const banner = document.getElementById('__antigravity_overlay_banner');
-    if (banner && banner.contains(e.target)) return;
+    // The banner lives in a closed shadow root: events from it are retargeted to the overlay host.
+    if (workOverlay && e.target === workOverlay) return;
     if (e.target && e.target.id === '__autono_mascot_host') return; // the mascot stays clickable during a task
     
     // If the event is a direct user physical action (e.isTrusted === true),
@@ -37,7 +38,7 @@
 
   function showWorkOverlay(options = {}) {
     if (workOverlay) {
-      const label = document.getElementById('__antigravity_overlay_label');
+      const label = workLabel;
       if (label && options.title) {
         label.textContent = options.title.replace(/^Code:\s*/i, '');
       }
@@ -146,6 +147,7 @@
     });
 
     pauseBtn.addEventListener('click', (e) => {
+      if (!e.isTrusted) return; // page scripts cannot press Pause/Resume
       e.stopPropagation();
       isWorkPaused = !isWorkPaused;
       if (isWorkPaused) {
@@ -186,85 +188,11 @@
       transition: 'all 0.15s ease',
     });
 
-    // Inline input container (initially hidden)
-    const inlineInputBox = document.createElement('div');
-    inlineInputBox.id = '__antigravity_inline_input_box';
-    Object.assign(inlineInputBox.style, {
-      display: 'none',
-      alignItems: 'center',
-      gap: '8px',
-      marginLeft: '4px',
-    });
-
-    const inlineInput = document.createElement('input');
-    inlineInput.type = 'text';
-    inlineInput.id = '__antigravity_inline_input';
-    inlineInput.placeholder = 'Instruction for Autono... (Press Enter to send)';
-    Object.assign(inlineInput.style, {
-      background: 'rgba(0, 0, 0, 0.65)',
-      border: '1px solid rgba(168, 85, 247, 0.5)',
-      borderRadius: '16px',
-      color: '#ffffff',
-      fontSize: '12px',
-      padding: '4px 12px',
-      outline: 'none',
-      width: '260px',
-      boxSizing: 'border-box',
-    });
-
-    const sendInlineBtn = document.createElement('button');
-    sendInlineBtn.type = 'button';
-    sendInlineBtn.innerHTML = '➤';
-    Object.assign(sendInlineBtn.style, {
-      background: '#9333ea',
-      border: 'none',
-      borderRadius: '50%',
-      width: '24px',
-      height: '24px',
-      color: '#ffffff',
-      fontSize: '11px',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    });
-
-    function sendIntervention() {
-      const text = (inlineInput.value || '').trim();
-      if (!text) return;
-      chrome.runtime.sendMessage({
-        type: 'user_intervention',
-        text,
-      });
-      inlineInput.value = '';
-      inlineInputBox.style.display = 'none';
-      writeBtn.style.display = 'inline-block';
-      label.textContent = 'Instruction sent to Autono';
-      setTimeout(() => {
-        if (!isWorkPaused) label.textContent = cleanTitle;
-      }, 2500);
-    }
-
-    sendInlineBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sendIntervention();
-    });
-
-    inlineInput.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') {
-        sendIntervention();
-      } else if (e.key === 'Escape') {
-        inlineInputBox.style.display = 'none';
-        writeBtn.style.display = 'inline-block';
-      }
-    });
-
+    // Instructions to the agent are written in the side panel only (no free-text box in the page:
+    // any page script could have driven it). The Write button just opens the panel.
     writeBtn.addEventListener('click', (e) => {
+      if (!e.isTrusted) return;
       e.stopPropagation();
-      writeBtn.style.display = 'none';
-      inlineInputBox.style.display = 'flex';
-      setTimeout(() => inlineInput.focus(), 50);
       chrome.runtime.sendMessage({ type: 'open_side_panel' });
     });
 
@@ -291,34 +219,30 @@
       marginLeft: '2px',
     });
     stopOverlayBtn.addEventListener('click', (e) => {
+      if (!e.isTrusted) return;
       e.stopPropagation();
       hideWorkOverlay();
       chrome.runtime.sendMessage({ type: 'cancel_task' });
     });
 
-    inlineInputBox.appendChild(inlineInput);
-    inlineInputBox.appendChild(sendInlineBtn);
-
     banner.appendChild(dot);
     banner.appendChild(label);
     banner.appendChild(pauseBtn);
     banner.appendChild(writeBtn);
-    banner.appendChild(inlineInputBox);
     banner.appendChild(stopOverlayBtn);
-    overlay.appendChild(banner);
 
-    // Keyframes style
-    if (!document.getElementById('__antigravity_overlay_styles')) {
-      const styleEl = document.createElement('style');
-      styleEl.id = '__antigravity_overlay_styles';
-      styleEl.textContent = `
-        @keyframes antigravity-pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.4; transform: scale(0.85); }
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
+    // Closed shadow root: page scripts cannot reach the banner controls through the DOM.
+    const shadow = overlay.attachShadow({ mode: 'closed' });
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      @keyframes antigravity-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+      }
+    `;
+    shadow.appendChild(styleEl);
+    shadow.appendChild(banner);
+    workLabel = label;
 
     document.documentElement.appendChild(frame);
     document.documentElement.appendChild(overlay);
@@ -346,6 +270,7 @@
           workFrame.remove();
           workFrame = null;
         }
+        workLabel = null;
       }, 250);
     }
   }
@@ -387,6 +312,7 @@
   }
 
   function onPickerClick(event) {
+    if (!event.isTrusted) return; // a page cannot "pick" a fragment by itself
     event.preventDefault();
     event.stopPropagation();
     const target = event.target;
@@ -406,6 +332,7 @@
   }
 
   function onPickerKey(event) {
+    if (!event.isTrusted) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       stopPicker();
@@ -500,112 +427,8 @@
     }
   });
 
-  // ─── Global Keyboard Shortcuts (09 to Open, 90 to Close) ───────────────────
-  let lastPressedKey = '';
-  let lastKeyTime = 0;
-  const heldKeys = new Set();
-
-  function isZeroKey(e) {
-    return e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0';
-  }
-
-  function isNineKey(e) {
-    return e.key === '9' || e.code === 'Digit9' || e.code === 'Numpad9';
-  }
-
-  function isEditableElement(target) {
-    if (!target) return false;
-    const tagName = target.tagName ? target.tagName.toLowerCase() : '';
-    return (
-      target.isContentEditable ||
-      tagName === 'input' ||
-      tagName === 'textarea' ||
-      tagName === 'select'
-    );
-  }
-
-  window.addEventListener(
-    'keydown',
-    (e) => {
-      // Must be a trusted physical event from the user to prevent webpage synthetic hijacking
-      if (!e.isTrusted) return;
-
-      // Optional fallback: Alt + Control + C or Alt + Shift + C -> Open Side Panel
-      const isC = e.key === 'c' || e.key === 'C' || e.code === 'KeyC';
-      const isAltCtrlC = (e.ctrlKey || e.metaKey) && e.altKey && isC;
-      const isAltShiftC = e.altKey && e.shiftKey && isC;
-      if (isAltCtrlC || isAltShiftC) {
-        e.preventDefault();
-        e.stopPropagation();
-        chrome.runtime.sendMessage({ type: 'open_side_panel' });
-        return;
-      }
-
-      const isEditable = isEditableElement(e.target);
-      const now = Date.now();
-
-      // Check key '0'
-      if (isZeroKey(e)) {
-        heldKeys.add('0');
-
-        // Check if '9' was pressed before '0' within 750ms -> "90" (Hide/Close)
-        const is90Sequence = lastPressedKey === '9' && (now - lastKeyTime < 750);
-        const is90Chord = heldKeys.has('9');
-
-        if (is90Chord || (!isEditable && is90Sequence)) {
-          e.preventDefault();
-          e.stopPropagation();
-          lastPressedKey = '';
-          chrome.runtime.sendMessage({ type: 'close_side_panel' });
-          return;
-        }
-
-        lastPressedKey = '0';
-        lastKeyTime = now;
-        return;
-      }
-
-      // Check key '9'
-      if (isNineKey(e)) {
-        heldKeys.add('9');
-
-        // Check if '0' was pressed before '9' within 750ms -> "09" (Show/Open)
-        const is09Sequence = lastPressedKey === '0' && (now - lastKeyTime < 750);
-        const is09Chord = heldKeys.has('0');
-
-        if (is09Chord || (!isEditable && is09Sequence)) {
-          e.preventDefault();
-          e.stopPropagation();
-          lastPressedKey = '';
-          chrome.runtime.sendMessage({ type: 'open_side_panel' });
-          return;
-        }
-
-        lastPressedKey = '9';
-        lastKeyTime = now;
-        return;
-      }
-
-      // Any other key resets sequential tracking
-      lastPressedKey = '';
-    },
-    true
-  );
-
-  window.addEventListener(
-    'keyup',
-    (e) => {
-      if (!e.isTrusted) return;
-      if (isZeroKey(e)) heldKeys.delete('0');
-      if (isNineKey(e)) heldKeys.delete('9');
-    },
-    true
-  );
-
-  window.addEventListener('blur', () => {
-    heldKeys.clear();
-    lastPressedKey = '';
-  });
+  // Autono security: the digit chords (09 / 90) and Alt+Ctrl+C were removed. They ran on every page in the capture phase and
+  // dropped digits typed into OTP / phone / card fields. The panel opens with the browser command (Alt+Shift+A).
 
   // Check if there is an active running task on this tab upon page load / navigation
   try {

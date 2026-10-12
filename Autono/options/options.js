@@ -80,8 +80,14 @@
     bridgeStatusNotice.textContent = `Probando ${url}...`;
     bridgeStatusNotice.className = 'status-notice';
 
+    // Autono security: the Bridge expects the pairing token once one exists
+    let authHeaders = {};
     try {
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+      const t = (await chrome.storage.local.get('autono_pairing_token')).autono_pairing_token;
+      authHeaders = { Authorization: 'Bearer ' + (t || 'sk-antigravity') };
+    } catch (_) { /* no token */ }
+    try {
+      const res = await fetch(`${url}/health`, { headers: authHeaders, signal: AbortSignal.timeout(3000), redirect: 'error' });
       if (res.ok) {
         const json = await res.json();
         bridgeStatusNotice.textContent = `🟢 Antigravity Bridge Activo (${json.service || 'Conectado'})`;
@@ -91,7 +97,7 @@
     } catch {
       // try fallback
       try {
-        const res2 = await fetch(`${url}/v1/models`, { signal: AbortSignal.timeout(3000) });
+        const res2 = await fetch(`${url}/v1/models`, { headers: authHeaders, signal: AbortSignal.timeout(3000), redirect: 'error' });
         if (res2.ok) {
           bridgeStatusNotice.textContent = `🟢 Antigravity Bridge Activo (OpenAI Gateway)`;
           bridgeStatusNotice.className = 'status-notice online';
@@ -108,7 +114,11 @@
   }
 
   async function saveSettings() {
-    const settings = {
+    const prevData = await chrome.storage.local.get('antigravity_settings');
+    const prev = (prevData && prevData.antigravity_settings) || {};
+    // Only the fields this page edits; everything else (tinyFishApiKey, mascot, multiAgent,
+    // shadowOnComplete, ...) is preserved by merging into the existing object below.
+    const changes = {
       bridgeUrl: bridgeUrlInput.value.trim() || 'http://127.0.0.1:8765',
       localMcpUrl: localMcpUrlInput ? localMcpUrlInput.value.trim() : `${bridgeUrlInput.value.trim()}/mcp/sse`,
       selectedModel: defaultModelSelect.value,
@@ -122,6 +132,7 @@
       openaiMode: openaiModeSelect ? openaiModeSelect.value : 'api',
       openaiApiKey: openaiApiKeyInput ? openaiApiKeyInput.value.trim() : '',
     };
+    const settings = { ...prev, ...changes };
 
     const customLimits = {
       'claude-sonnet-4-6': parseInt(limitSonnetInput.value, 10) || 45,
@@ -144,20 +155,7 @@
       antigravity_openai_api_key: settings.openaiApiKey,
     });
 
-    try {
-      fetch(`${settings.bridgeUrl}/api/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          antigravity_mode: settings.antigravityMode,
-          gemini_api_key: settings.geminiApiKey,
-          claude_mode: settings.claudeMode,
-          anthropic_api_key: settings.anthropicApiKey,
-          openai_mode: settings.openaiMode,
-          openai_api_key: settings.openaiApiKey,
-        }),
-      }).catch(() => null);
-    } catch (_) {}
+    // API keys are intentionally NOT pushed to the Bridge from this page (audit A11).
 
     savedNotice.classList.remove('hidden');
     setTimeout(() => {

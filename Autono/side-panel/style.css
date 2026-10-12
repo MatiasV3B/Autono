@@ -6681,3 +6681,18 @@ html[data-chat-spacing="compact"] #messagesContainer {
 .dictation-ghost.hidden { display: none; }
 @keyframes mic-think { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 #whisperLocal.hidden { display: none !important; }
+
+/* Autono security: approval cards and code-run confirmation */
+.action-perm-row { font-size: 11.5px; margin: 3px 0; word-break: break-all; }
+.action-perm-label { font-size: 11px; color: #a1a1aa; margin-top: 4px; }
+.action-perm-value.mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.action-perm-goal { white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; margin: 4px 0; padding: 6px 8px; font-size: 11.5px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: #e4e4e7; }
+.action-perm-agent-item { margin: 4px 0; font-size: 11.5px; }
+.approval-card-expired { font-size: 11.5px; color: #a1a1aa; padding: 6px 2px; }
+.code-run-modal-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.code-run-modal { background: #18181b; border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 12px; padding: 14px; width: 100%; max-height: 90vh; overflow: auto; }
+.code-run-code { max-height: 50vh; }
+
+/* Autono security: acknowledgment line in the code-run dialog */
+.code-run-ack { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; cursor: pointer; }
+.code-run-modal .agent-perm-btn:disabled { opacity: 0.45; cursor: not-allowed; }

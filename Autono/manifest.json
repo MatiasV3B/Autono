@@ -2,6 +2,8 @@
   "manifest_version": 3,
   "name": "Autono",
   "version": "1.0.0",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
   "description": "Autonomous AI browser agent and navigation copilot with Chat & Cowork modes, connected to local Antigravity Bridge (Gemini 3.8, Claude).",
   "icons": {
     "16": "assets/icon-16.png",
@@ -35,42 +37,28 @@
   "side_panel": {
     "default_path": "side-panel/index.html"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*",
-        "<all_urls>"
-      ],
-      "js": [
-        "content/content.js",
-        "content/mascot.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "permissions": [
     "storage",
     "activeTab",
     "scripting",
-    "tabs",
     "tabGroups",
     "unlimitedStorage",
-    "webNavigation",
-    "notifications",
     "sidePanel",
     "power",
     "alarms",
     "contextMenus"
   ],
   "host_permissions": [
-    "<all_urls>",
     "http://127.0.0.1:*/*",
-    "http://localhost:*/*"
+    "http://localhost:*/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://api.search.tinyfish.ai/*"
   ],
   "options_page": "options/options.html",
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:* http://[::1]:* https:"
   },
   "cross_origin_embedder_policy": {
     "value": "require-corp"
@@ -81,13 +69,15 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/*",
-        "domExtractor.js",
-        "buildDomTree.js"
+        "assets/mascot/*.gif"
       ],
       "matches": [
-        "<all_urls>"
+        "http://*/*",
+        "https://*/*"
       ]
     }
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ]
 }

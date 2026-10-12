@@ -2,15 +2,22 @@ node_modules/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 *.log
 .DS_Store
 Thumbs.db
 *.key
 *.pem
+*.p12
+*.crx
+*.zip
+*.tgz
 dist/
 coverage/
 .cache/
 .vscode/
+.idea/
 search_script.ps1
 
 # Local-only experimental copy (not published)

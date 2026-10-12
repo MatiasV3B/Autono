@@ -7,14 +7,54 @@ import { searchWithTinyFish, formatTinyFishForPrompt } from '../lib/tinyfish.js'
 import katex from './vendor/katex.mjs';
 import { marked } from './vendor/marked.esm.js';
 import { SpeechSegmenter, cleanTranscript, SAMPLE_RATE } from './dictation-vad.js';
+import { sanitizeHtml, escapeText } from './sanitize.js';
 
 marked.setOptions({
   gfm: true,
   breaks: true,
 });
+// Raw HTML typed (or injected) in model output is shown as text, never parsed; task-list inputs become plain text.
+// The result of marked is additionally passed through sanitizeHtml() in renderMarkdown().
+marked.use({
+  renderer: {
+    html(token) { return escapeText((token && (token.text ?? token.raw)) || ''); },
+    checkbox(token) { return token && token.checked ? '[x] ' : '[ ] '; },
+  },
+});
 
 (function () {
   'use strict';
+
+  // --- Autono security: Bridge auth for every panel -> Bridge call (A11) ---
+  // The per-install pairing token is sent as Authorization: Bearer <token> to the configured Bridge / MCP
+  // origins only (never to other hosts); credentialed requests do not follow redirects.
+  const AS = window.AutonoSecurity;
+  let pairingToken = '';
+  try {
+    chrome.storage.local.get('autono_pairing_token', (r) => { pairingToken = (r && r.autono_pairing_token) || ''; });
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'local' && ch.autono_pairing_token) pairingToken = ch.autono_pairing_token.newValue || '';
+    });
+  } catch (_) { /* ignore */ }
+  function isBridgeOrigin(urlStr) {
+    try {
+      const u = new URL(urlStr, location.href);
+      for (const id of ['settingBridgeUrl', 'settingLocalMcpUrl']) {
+        const v = document.getElementById(id)?.value?.trim();
+        const p = v ? AS.parseBridgeUrl(v) : null;
+        if (p && p.ok && p.origin === u.origin) return true;
+      }
+      return u.origin === 'http://127.0.0.1:8765';
+    } catch (_) { return false; }
+  }
+  const fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!isBridgeOrigin(url)) return window.fetch(input, init);
+    const headers = new Headers((init && init.headers) || {});
+    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${pairingToken || 'sk-antigravity'}`);
+    return window.fetch(input, { ...(init || {}), headers, redirect: 'error' });
+  };
+  // --- end ---
 
   // ─── DOM References ─────────────────────────────────────────────────────────
   const modelPickerTrigger = document.getElementById('modelPickerTrigger');
@@ -66,21 +106,24 @@ marked.setOptions({
   const sessionsList = document.getElementById('sessionsList');
 
   const settingsModal = document.getElementById('settingsModal');
+  // Settings controls are always looked up INSIDE #settingsModal: markup that ends up elsewhere in the page
+  // (chat messages) can never shadow them by reusing their ids.
+  const settingEl = (id) => settingsModal.querySelector('#' + id);
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-  const settingBridgeUrl = document.getElementById('settingBridgeUrl');
-  const settingDefaultModel = document.getElementById('settingDefaultModel');
-  const settingMaxSteps = document.getElementById('settingMaxSteps');
-  const settingMaxOutputTokens = document.getElementById('settingMaxOutputTokens');
-  const settingTinyFishKey = document.getElementById('settingTinyFishKey');
-  const settingDisplayMode = document.getElementById('settingDisplayMode');
-  const settingAntigravityMode = document.getElementById('settingAntigravityMode');
-  const settingGeminiApiKey = document.getElementById('settingGeminiApiKey');
+  const settingBridgeUrl = settingEl('settingBridgeUrl');
+  const settingDefaultModel = settingEl('settingDefaultModel');
+  const settingMaxSteps = settingEl('settingMaxSteps');
+  const settingMaxOutputTokens = settingEl('settingMaxOutputTokens');
+  const settingTinyFishKey = settingEl('settingTinyFishKey');
+  const settingDisplayMode = settingEl('settingDisplayMode');
+  const settingAntigravityMode = settingEl('settingAntigravityMode');
+  const settingGeminiApiKey = settingEl('settingGeminiApiKey');
   const toggleGeminiKeyVisibility = document.getElementById('toggleGeminiKeyVisibility');
-  const settingClaudeMode = document.getElementById('settingClaudeMode');
-  const settingAnthropicApiKey = document.getElementById('settingAnthropicApiKey');
+  const settingClaudeMode = settingEl('settingClaudeMode');
+  const settingAnthropicApiKey = settingEl('settingAnthropicApiKey');
   const toggleAnthropicKeyVisibility = document.getElementById('toggleAnthropicKeyVisibility');
-  const settingOpenaiMode = document.getElementById('settingOpenaiMode');
-  const settingOpenaiApiKey = document.getElementById('settingOpenaiApiKey');
+  const settingOpenaiMode = settingEl('settingOpenaiMode');
+  const settingOpenaiApiKey = settingEl('settingOpenaiApiKey');
   const toggleOpenaiKeyVisibility = document.getElementById('toggleOpenaiKeyVisibility');
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 
@@ -97,6 +140,7 @@ marked.setOptions({
 
   // Active Approval Cards Registry
   const activeApprovalCards = new Map();
+  let allowCodeExecutionEnabled = false; // Autono security: mirrors the allowCodeExecution setting (default off)
 
   // ─── State ──────────────────────────────────────────────────────────────────
   let port = null;
@@ -111,7 +155,10 @@ marked.setOptions({
   let currentSessionId = generateId();
   let currentTaskId = null;
   let isGenerating = false;
-  const isSearchActive = true; // web search (TinyFish) is always on; there is no switch any more
+  const isSearchActive = true; // search plumbing is present; whether it runs is decided by the opt-in below
+  // Autono security (A22): web search is OFF unless the user turns it on in Settings (and has a TinyFish key)
+  let webSearchEnabled = false;
+  let webSearchThisMessage = true; // per-message gate (kept true; cleared by programmatic sends via opts.noSearch)
   let isCoworkActive = false;
   let attachedImageDataUrl = null;
   let currentStreamingBubble = null;
@@ -150,6 +197,31 @@ marked.setOptions({
     const savedOpenaiKey = localStorage.getItem('antigravity_openai_api_key');
     if (savedOpenaiKey) currentOpenaiApiKey = savedOpenaiKey;
   } catch (_) {}
+  // --- Autono security (A11): API keys live only in chrome.storage.local. Migrate once, delete the copies. ---
+  try {
+    const legacyKeyNames = ['antigravity_gemini_api_key', 'antigravity_anthropic_api_key', 'antigravity_openai_api_key'];
+    const found = {};
+    for (const k of legacyKeyNames) {
+      const v = localStorage.getItem(k);
+      if (v) found[k] = v;
+    }
+    if (Object.keys(found).length > 0) {
+      chrome.storage.local.get(legacyKeyNames, (existing) => {
+        const toSet = {};
+        for (const k of Object.keys(found)) if (!existing || !existing[k]) toSet[k] = found[k];
+        const done = () => { for (const k of legacyKeyNames) { try { localStorage.removeItem(k); } catch (_) {} } };
+        if (Object.keys(toSet).length) chrome.storage.local.set(toSet, done); else done();
+      });
+    }
+    // a copy of the whole settings object (with keys) used to live here too
+    const oldSettings = localStorage.getItem('antigravity_settings');
+    if (oldSettings) {
+      const parsedOld = JSON.parse(oldSettings);
+      for (const k of ['geminiApiKey', 'anthropicApiKey', 'openaiApiKey', 'tinyFishApiKey']) delete parsedOld[k];
+      localStorage.setItem('antigravity_settings', JSON.stringify(parsedOld));
+    }
+  } catch (_) {}
+  // --- end ---
   let customSkills = [];
   try {
     const savedSkills = localStorage.getItem('antigravity_custom_skills');
@@ -168,6 +240,20 @@ marked.setOptions({
       if (Array.isArray(parsedProv)) externalProviders = parsedProv;
     }
   } catch (_) {}
+  // --- Autono security (A11): provider keys only in chrome.storage.local; migrate once, drop the localStorage copy ---
+  try {
+    chrome.storage.local.get('antigravity_external_providers', (r) => {
+      const stored = r && Array.isArray(r.antigravity_external_providers) ? r.antigravity_external_providers : null;
+      if (stored && stored.length) {
+        externalProviders = stored;
+        try { syncExternalProvidersToPicker(); renderExternalProvidersList(); } catch (_) { /* not ready yet */ }
+      } else if (externalProviders.length) {
+        chrome.storage.local.set({ antigravity_external_providers: externalProviders });
+      }
+      try { localStorage.removeItem('antigravity_external_providers'); } catch (_) {}
+    });
+  } catch (_) {}
+  // --- end ---
 
   // Active files in current session (created by model or attached by user)
   const sessionActiveFiles = new Map();
@@ -660,7 +746,7 @@ marked.setOptions({
           promptInput.value = cleanText;
           handleInputStateChange();
           hideAiPromptSuggestions();
-          handleSend();
+          handleSend({ noSearch: true }); // model-authored text: no web search (A18/A22)
         }
       });
       row.appendChild(chip);
@@ -864,6 +950,7 @@ marked.setOptions({
         if (msg.settings) {
           applyLoadedSettings(msg.settings);
         }
+        if (msg.mcpStatus) window.__autonoMcpStatus?.(msg.mcpStatus);
         allSessions = msg.sessions || [];
 
         if (msg.activeSessionId) {
@@ -952,15 +1039,28 @@ marked.setOptions({
       case 'quota_update':
         break;
 
+      case 'CONTEXT_MENU_ASK_ANTIGRAVITY':
+        handleContextMenuAsk(msg);
+        break;
+
       case 'external_user_message':
         if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         createMessageRow('user', msg.text || '');
         break;
 
       case 'agent_permission_request':
-        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showAgentPermissionCard(msg);
         break;
+
+      // --- Autono security: action approval cards ---
+      case 'action_permission_request':
+        showActionPermissionCard(msg);
+        break;
+
+      case 'action_permission_resolved':
+        resolveActionPermissionCard(msg.requestId, 'Closed');
+        break;
+      // --- end ---
 
       case 'task_start':
         isGenerating = true;
@@ -1167,8 +1267,12 @@ marked.setOptions({
           currentCoworkBubble = null;
           currentPlanData = null;
         } else {
-          const errRow = createMessageRow('assistant', errorCardHtml);
-          if (errRow) attachErrorCardRetryListener(errRow);
+          // Trusted, extension-generated markup: inserted directly, not through renderMarkdown/the sanitiser
+          const errRow = createMessageRow('assistant', '');
+          if (errRow) {
+            errRow.innerHTML = errorCardHtml;
+            attachErrorCardRetryListener(errRow);
+          }
         }
         scrollToBottom();
         break;
@@ -1208,6 +1312,27 @@ marked.setOptions({
         showLiveActivity('⚡ Task resumed');
         showToast('▶ Session resumed in active tab');
         break;
+
+      // --- Autono security (A10/A20): external control indicator, approvals, settings warnings ---
+      case 'external_action_request':
+        window.__autonoShowExternal?.('request', msg);
+        break;
+
+      case 'external_action':
+        window.__autonoShowExternal?.('action', { summary: `${msg.summary || msg.action} (from ${msg.host || 'external agent'})` });
+        break;
+
+      case 'mcp_bridge_status':
+        window.__autonoMcpStatus?.(msg.status);
+        break;
+
+      case 'settings_warning':
+        (msg.items || []).forEach((it) => {
+          if (it.error) showToast(`Setting ${it.field} rejected (${it.error}). The previous value was kept.`);
+          else if (it.warning) showToast(`Warning: ${it.field} points to ${it.host}, which is not on this computer.`);
+        });
+        break;
+      // --- end ---
 
       case 'user_intervention_received':
         showLiveActivity(`✍ Instruction: "${(msg.text || '').slice(0, 30)}..."`);
@@ -3355,7 +3480,7 @@ marked.setOptions({
   function dictationLanguage() {
     const saved = localStorage.getItem(DICT_LANG_KEY);
     if (saved === 'en' || saved === 'es' || saved === 'auto') return saved;
-    const response = document.getElementById('settingAgentLanguage')?.value;
+    const response = settingEl('settingAgentLanguage')?.value;
     return response === 'en' || response === 'es' ? response : 'auto';
   }
 
@@ -3821,8 +3946,9 @@ marked.setOptions({
     micBtn.addEventListener('click', () => (dictating ? stopDictation() : startDictation()));
   }
 
-  toggleCoworkBtn.addEventListener('click', () => {
-    isCoworkActive = !isCoworkActive;
+  // Switches Chat <-> Cowork (also used by skills whose mode differs from the current one)
+  function toggleCoworkMode(on) {
+    isCoworkActive = typeof on === 'boolean' ? on : !isCoworkActive;
     toggleCoworkBtn.classList.toggle('active', isCoworkActive);
     if (isCoworkActive) {
       promptInput.placeholder = 'Asigna una meta para que el agente la realice en el navegador...';
@@ -3830,7 +3956,13 @@ marked.setOptions({
     } else {
       promptInput.placeholder = 'Envía un mensaje a Antigravity...';
     }
-  });
+  }
+
+  function autoResizePrompt() {
+    handleInputStateChange();
+  }
+
+  toggleCoworkBtn.addEventListener('click', () => toggleCoworkMode());
 
   // ─── Toast Notice Helper ───────────────────────────────────────────────────
   function showToast(message, duration = 4000) {
@@ -3985,6 +4117,7 @@ marked.setOptions({
       }
 
       isPickingFragment = true;
+      try { await chrome.runtime.sendMessage({ type: 'antigravity_picker_armed', tabId: tab.id }); } catch (_) { /* worker asleep: retried by the next message */ }
       try {
         await chrome.tabs.sendMessage(tab.id, { type: 'antigravity_start_picker' });
         showToast('Picker mode active: Click on an element or press Esc to cancel.');
@@ -4142,7 +4275,11 @@ marked.setOptions({
   });
 
   // ─── Send / Stop Execution (with TinyFish Web Search & CoT) ─────────────────
-  async function handleSend() {
+  async function handleSend(opts = {}) {
+    // Autono security (A18/A22): programmatic sends (suggestion chips, approval-card answers) carry
+    // model-authored text: they never trigger a web search.
+    const noSearch = !!(opts && opts.noSearch === true);
+    const contextBlocks = []; // sent next to the goal; the background places them in the untrusted block
     const text = promptInput.value.trim();
     if (!text && attachedItems.length === 0) return;
 
@@ -4157,6 +4294,9 @@ marked.setOptions({
       }
       return;
     }
+
+    // Autono security: ask for page access on first use (inside this click/Enter gesture), not at install
+    if (!text.startsWith('/btw')) await ensureSiteAccess();
 
     // Direct /btw sidecar shortcut handling
     if (text.startsWith('/btw')) {
@@ -4209,16 +4349,19 @@ marked.setOptions({
 
     // If Search is active, perform TinyFish search!
     // (greetings and slash commands are not worth a web search)
-    if (isSearchActive && text && text.length >= 8 && !text.startsWith('/')) {
-      showLiveActivity('🔍 Buscando en la web con TinyFish AI...');
+    // Autono security (A22): opt-in (setting + per-message switch), needs the user's own TinyFish key,
+    // and only the typed text is sent (no attachments, no selection).
+    const searchThisMessage = webSearchEnabled && webSearchThisMessage && !!tinyFishApiKey && !noSearch;
+    if (searchThisMessage && isSearchActive && text && text.length >= 8 && !text.startsWith('/')) {
+      showLiveActivity('🔍 Searching the web with TinyFish AI...');
       try {
         const searchResp = await searchWithTinyFish(text, {
           apiKey: tinyFishApiKey,
-          purpose: 'Asistencia al usuario y consulta web',
+          purpose: 'User web query',
         });
         if (searchResp && searchResp.results && searchResp.results.length > 0) {
           const searchContext = formatTinyFishForPrompt(searchResp);
-          finalPrompt = `${finalPrompt}\n\n${searchContext}`;
+          contextBlocks.push({ kind: 'search_results', name: 'TinyFish web search', text: searchContext });
 
           lastSearchSources = searchResp.results.map(r => {
             let domain = r.site_name || '';
@@ -4232,7 +4375,7 @@ marked.setOptions({
               url: r.url,
               domain: domain || 'web',
               snippet: r.snippet,
-              favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+              favicon: '', // Autono security (A22): no third-party favicon service; the UI draws a letter avatar
             };
           });
 
@@ -4274,14 +4417,17 @@ marked.setOptions({
           if (!firstImageDataUrl) firstImageDataUrl = item.dataUrl;
           userDisplayList.push(`📷 ${item.name}`);
         } else {
-          fileParts.push(`<nano_file_content type="${item.type || 'file'}" name="${item.name}">\n${item.content}\n</nano_file_content>`);
+          // Autono security (A18): attachments / tabs / fragments / selections are separate context
+          // fields, never concatenated into the goal text.
+          fileParts.push(item.name);
+          contextBlocks.push({
+            kind: item.type === 'tab' ? 'tab' : (item.type === 'fragment' ? 'fragment' : 'attachment'),
+            name: String(item.name || '').slice(0, 120),
+            url: item.url || '',
+            text: String(item.content || ''),
+          });
           userDisplayList.push(`📎 ${item.name}`);
         }
-      }
-
-      if (fileParts.length > 0) {
-        const attachedXml = `\n\n<nano_attached_files>\n${fileParts.join('\n')}\n</nano_attached_files>`;
-        finalPrompt += attachedXml;
       }
 
       const filesHeader = userDisplayList.join('\n');
@@ -4289,11 +4435,11 @@ marked.setOptions({
     }
 
     // Feed active session files context for modifications and file tools
-    if (sessionActiveFiles.size > 0 && !finalPrompt.includes('<active_session_files>')) {
-      const activeFileList = Array.from(sessionActiveFiles.entries()).slice(-6).map(([fname, a]) => {
-        return `<file name="${fname}" version="${a.version}">\n${a.content.slice(0, 3000)}\n</file>`;
-      }).join('\n');
-      finalPrompt += `\n\n<active_session_files>\n${activeFileList}\n</active_session_files>\n[Instrucción de archivos: Puedes crear y modificar archivos PDF, DOCX, HTML, SVG, Markdown y scripts de código. Si el usuario pide modificar un archivo existente, genera la versión actualizada completa usando el bloque con el mismo nombre ej: \`\`\`ext:nombre.ext]`;
+    if (sessionActiveFiles.size > 0) {
+      Array.from(sessionActiveFiles.entries()).slice(-6).forEach(([fname, a]) => {
+        contextBlocks.push({ kind: 'session_file', name: `${fname} (version ${a.version})`, text: String(a.content || '').slice(0, 3000) });
+      });
+      finalPrompt += `\n\n[Instrucción de archivos: Puedes crear y modificar archivos PDF, DOCX, HTML, SVG, Markdown y scripts de código. Si el usuario pide modificar un archivo existente, genera la versión actualizada completa usando el bloque con el mismo nombre ej: \`\`\`ext:nombre.ext]`;
     }
 
     // Create user message row
@@ -4353,6 +4499,7 @@ marked.setOptions({
         thinkingEffort: currentThinkingEffort,
         includeScreenshot: !!screenshotToSend,
         provider: effectiveProvider,
+        contextBlocks,
       });
     } else {
       sendPortMessage({
@@ -4364,6 +4511,7 @@ marked.setOptions({
         modelName: currentModel,
         thinkingEffort: currentThinkingEffort,
         provider: effectiveProvider,
+        contextBlocks,
       });
     }
 
@@ -4386,7 +4534,37 @@ marked.setOptions({
 
   stopBtn.addEventListener('click', handleStop);
 
+  // --- Autono security (A19): Pause / Resume next to Stop, so the kill switch lives in the side panel ---
+  let panelPauseBtn = null;
+  let panelPaused = false;
+  function ensurePauseBtn() {
+    if (panelPauseBtn || !stopBtn || !stopBtn.parentElement) return panelPauseBtn;
+    panelPauseBtn = document.createElement('button');
+    panelPauseBtn.type = 'button';
+    panelPauseBtn.className = stopBtn.className;
+    panelPauseBtn.classList.add('hidden');
+    panelPauseBtn.title = 'Pause task';
+    panelPauseBtn.textContent = '❚❚';
+    panelPauseBtn.addEventListener('click', () => {
+      if (!isGenerating) return;
+      panelPaused = !panelPaused;
+      sendPortMessage({ type: panelPaused ? 'pause_cowork_task' : 'resume_cowork_task', reason: 'user_panel' });
+      panelPauseBtn.title = panelPaused ? 'Resume task' : 'Pause task';
+      panelPauseBtn.textContent = panelPaused ? '▶' : '❚❚';
+    });
+    stopBtn.parentElement.insertBefore(panelPauseBtn, stopBtn);
+    return panelPauseBtn;
+  }
+  // --- end ---
+
   function toggleInputState(generating) {
+    {
+      const pb = ensurePauseBtn();
+      if (pb) {
+        pb.classList.toggle('hidden', !(generating && isCoworkActive));
+        if (!generating) { panelPaused = false; pb.title = 'Pause task'; pb.textContent = '❚❚'; }
+      }
+    }
     if (generating) {
       stopBtn.classList.remove('hidden');
       sendBtn.classList.remove('hidden');
@@ -4619,7 +4797,7 @@ marked.setOptions({
 
       content.innerHTML = introHtml + planHtml + reportHtml;
       row.appendChild(content);
-      mountAllApprovalCards(content);
+      mountAllApprovalCards(content, true); // Autono security: cards restored from history are inert
       if (rawContent) {
         appendStreamingResponseBar(content, rawContent, (activePlan?.sources || []));
       }
@@ -5428,12 +5606,12 @@ marked.setOptions({
   }
 
   // ─── Local Agent MCP Server (Active Browser Bridge) ───────────────────────
-  const settingLocalMcpBridgeEnabled = document.getElementById('settingLocalMcpBridgeEnabled');
+  const settingLocalMcpBridgeEnabled = settingEl('settingLocalMcpBridgeEnabled');
   const localMcpStatusBadge = document.getElementById('localMcpStatusBadge');
   const copyMcpConfigSnippetBtn = document.getElementById('copyMcpConfigSnippetBtn');
   const copyMcpUrlBtn = document.getElementById('copyMcpUrlBtn');
   const mcpConfigSnippetCode = document.getElementById('mcpConfigSnippetCode');
-  const settingLocalMcpUrl = document.getElementById('settingLocalMcpUrl');
+  const settingLocalMcpUrl = settingEl('settingLocalMcpUrl');
   const testMcpUrlBtn = document.getElementById('testMcpUrlBtn');
   const syncMcpWithBridgeBtn = document.getElementById('syncMcpWithBridgeBtn');
 
@@ -5482,7 +5660,7 @@ marked.setOptions({
     localStorage.setItem('autono_local_mcp_url', val);
     chrome.storage.local.set({ autono_local_mcp_url: val });
     refreshMcpSnippet();
-    const isEnabled = document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false;
+    const isEnabled = settingEl('settingLocalMcpBridgeEnabled')?.checked ?? false;
     updateLocalMcpStatusUI(isEnabled);
 
     if (notifySave) {
@@ -5503,7 +5681,7 @@ marked.setOptions({
     btn.addEventListener('click', () => {
       const targetPort = btn.getAttribute('data-port');
       if (!targetPort) return;
-      const targetInput = document.getElementById('settingLocalMcpUrl');
+      const targetInput = settingEl('settingLocalMcpUrl');
       if (!targetInput) return;
       try {
         const cur = targetInput.value.trim() || 'http://127.0.0.1:8765/mcp/sse';
@@ -5523,7 +5701,7 @@ marked.setOptions({
   if (syncMcpWithBridgeBtn) {
     syncMcpWithBridgeBtn.addEventListener('click', () => {
       const bridgeBase = getActiveBridgeBaseUrl();
-      const targetInput = document.getElementById('settingLocalMcpUrl');
+      const targetInput = settingEl('settingLocalMcpUrl');
       if (targetInput) {
         targetInput.value = `${bridgeBase}/mcp/sse`;
         onMcpUrlChanged(true);
@@ -5596,22 +5774,120 @@ marked.setOptions({
   }
 
   if (settingLocalMcpBridgeEnabled) {
-    settingLocalMcpBridgeEnabled.addEventListener('change', () => {
-      const isEnabled = settingLocalMcpBridgeEnabled.checked;
-      localStorage.setItem('autono_local_mcp_bridge_enabled', String(isEnabled));
-      chrome.storage.local.set({ autono_local_mcp_bridge_enabled: isEnabled });
-      updateLocalMcpStatusUI(isEnabled);
-
-      // Save into settings object as well
-      const saved = JSON.parse(localStorage.getItem('antigravity_settings') || '{}');
-      saved.localMcpBridgeEnabled = isEnabled;
-      saved.localMcpUrl = getFullMcpSseUrl();
-      localStorage.setItem('antigravity_settings', JSON.stringify(saved));
-      sendPortMessage({ type: 'save_settings', settings: saved });
-
-      showToast(isEnabled ? 'Servidor MCP para agentes locales activado' : 'Servidor MCP desactivado');
+    // --- Autono security (A10): explicit toggle -> 'mcp_bridge_set' port message (no storage event) ---
+    settingLocalMcpBridgeEnabled.addEventListener('change', async () => {
+      const wantEnabled = settingLocalMcpBridgeEnabled.checked;
+      if (!wantEnabled) {
+        sendPortMessage({ type: 'mcp_bridge_set', enabled: false });
+        updateLocalMcpStatusUI(false);
+        showToast('Servidor MCP desactivado');
+        return;
+      }
+      const urlCheck = AS.parseBridgeUrl(getFullMcpSseUrl());
+      if (!urlCheck.ok) {
+        settingLocalMcpBridgeEnabled.checked = false;
+        showToast('MCP URL rejected: use http://127.0.0.1:<port>/mcp/sse (https for a remote host, no credentials).');
+        return;
+      }
+      let confirmHost = null;
+      if (!urlCheck.loopback) {
+        const okRemote = window.confirm(`Allow ${urlCheck.host} to control your browser?\n\nThis host is not on this computer. Only continue if you own it and it is reachable over https.`);
+        if (!okRemote) {
+          settingLocalMcpBridgeEnabled.checked = false;
+          return;
+        }
+        confirmHost = urlCheck.host;
+      }
+      // generate the per-install pairing token the first time; it is shown once
+      const existing = await new Promise((r) => chrome.storage.local.get('autono_pairing_token', (v) => r((v && v.autono_pairing_token) || '')));
+      if (!existing) generateAndShowPairingToken();
+      sendPortMessage({ type: 'mcp_bridge_set', enabled: true, confirmHost });
+      updateLocalMcpStatusUI(true);
+      showToast('Servidor MCP para agentes locales activado');
     });
   }
+
+  function generateAndShowPairingToken() {
+    const token = AS.generatePairingToken();
+    chrome.storage.local.set({ autono_pairing_token: token });
+    pairingToken = token;
+    const box = document.getElementById('mcpPairingTokenDisplay');
+    const note = document.getElementById('mcpPairingTokenNote');
+    if (box) { box.value = token; }
+    if (note) note.textContent = 'Copy this token into the Bridge now: it will not be shown again. Bridge calls from this extension carry it as Authorization: Bearer <token>; external-control calls carry X-Autono-Token.';
+    // hide it again after the user had time to copy it (it stays stored, not displayed)
+    setTimeout(() => {
+      if (box && box.value === token) { box.value = ''; box.placeholder = 'Token set (hidden). Regenerate to see a new one.'; }
+      if (note) note.textContent = 'The token is shown once, when generated. Copy it into the Bridge configuration.';
+    }, 120000);
+  }
+  document.getElementById('mcpPairingTokenBtn')?.addEventListener('click', () => {
+    if (!window.confirm('Generate a new pairing token? The Bridge must be updated with it, otherwise it will stop working.')) return;
+    generateAndShowPairingToken();
+    showToast('New pairing token generated');
+  });
+  // --- end ---
+
+  // --- Autono security (A10): in-panel indicator + approval bar for external actions ---
+  (function externalControlUi() {
+    const bar = document.createElement('div');
+    bar.id = 'autonoExternalBar';
+    bar.setAttribute('role', 'status');
+    bar.style.cssText = 'display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;padding:8px 10px;border-radius:8px;background:#7c2d12;color:#fff;font-size:12px;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    const text = document.createElement('div');
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:none;gap:8px;margin-top:6px';
+    const allowBtn = document.createElement('button');
+    allowBtn.type = 'button'; allowBtn.textContent = 'Allow once';
+    const denyBtn = document.createElement('button');
+    denyBtn.type = 'button'; denyBtn.textContent = 'Deny';
+    for (const b of [allowBtn, denyBtn]) b.style.cssText = 'padding:3px 10px;border-radius:6px;border:0;cursor:pointer;font-size:12px';
+    actions.append(allowBtn, denyBtn);
+    bar.append(text, actions);
+    document.body.appendChild(bar);
+    let pendingId = null;
+    let hideTimer = null;
+    const answer = (allow) => {
+      if (pendingId) sendPortMessage({ type: 'external_action_response', requestId: pendingId, allow });
+      pendingId = null;
+      actions.style.display = 'none';
+      bar.style.display = 'none';
+    };
+    allowBtn.addEventListener('click', () => answer(true));
+    denyBtn.addEventListener('click', () => answer(false));
+    window.__autonoShowExternal = (kind, msg) => {
+      clearTimeout(hideTimer);
+      if (kind === 'request') {
+        pendingId = msg.requestId;
+        text.textContent = `External agent asks to: ${msg.summary}`;
+        actions.style.display = 'flex';
+        bar.style.display = 'block';
+      } else {
+        text.textContent = `External control: ${msg.summary}`;
+        actions.style.display = pendingId ? 'flex' : 'none';
+        bar.style.display = 'block';
+        if (!pendingId) hideTimer = setTimeout(() => { bar.style.display = 'none'; }, 8000);
+      }
+    };
+    window.__autonoMcpStatus = (st) => {
+      const line = document.getElementById('mcpStatusLine');
+      if (!line || !st) return;
+      const reasons = {
+        too_many_failures: 'Stopped after 10 consecutive failures. Toggle it off and on to retry.',
+        unauthorized: 'Stopped: the Bridge rejected the pairing token.',
+        invalid_url: 'Blocked: the MCP URL is not valid.',
+        host_not_confirmed: 'Blocked: this non-loopback host was not confirmed.',
+        no_pairing_token: 'Blocked: no pairing token yet. Generate one.',
+      };
+      const label = st.state === 'running' ? `Running (${st.host})` : (st.state === 'off' ? 'Off' : (reasons[st.reason] || st.state));
+      line.textContent = `External control: ${label}`;
+      if ((st.state === 'stopped' || st.state === 'blocked') && settingLocalMcpBridgeEnabled) {
+        settingLocalMcpBridgeEnabled.checked = false;
+        showToast(reasons[st.reason] || 'External control stopped');
+      }
+    };
+  })();
+  // --- end ---
 
   if (copyMcpUrlBtn) {
     copyMcpUrlBtn.addEventListener('click', async () => {
@@ -5655,7 +5931,6 @@ marked.setOptions({
   // ─── External Providers Management (Up to 5 third-party providers) ─────────
   function saveExternalProvidersToStorage() {
     try {
-      localStorage.setItem('antigravity_external_providers', JSON.stringify(externalProviders));
       chrome.storage.local.set({ antigravity_external_providers: externalProviders });
     } catch (_) {}
     syncExternalProvidersToPicker();
@@ -5890,7 +6165,7 @@ marked.setOptions({
 
       const name = (nameInput?.value || '').trim();
       let provId = (idInput?.value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      const baseUrl = (baseUrlInput?.value || '').trim().replace(/\/+$/, '');
+      let baseUrl = (baseUrlInput?.value || '').trim().replace(/\/+$/, '');
       const apiKey = (apiKeyInput?.value || '').trim();
       const iconUrl = (extProvIconUrl?.value || '').trim();
 
@@ -5902,6 +6177,14 @@ marked.setOptions({
         showToast('Please specify a Base URL');
         return;
       }
+      // Autono security (A20): https (or loopback http), no embedded credentials
+      const provUrlCheck = AS.parseBridgeUrl(baseUrl);
+      if (!provUrlCheck.ok) {
+        showToast(provUrlCheck.error === 'insecure_http' ? 'Base URL must use https (http is only allowed for localhost).' : 'Base URL is not valid (no credentials, http/https only).');
+        return;
+      }
+      baseUrl = provUrlCheck.url;
+      if (provUrlCheck.warning) showToast(`Warning: ${provUrlCheck.host} is not on this computer; your prompts and key will be sent there.`);
       if (!provId) {
         provId = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
       }
@@ -5937,6 +6220,8 @@ marked.setOptions({
           providerId: provId,
         });
       }
+
+      ensureOriginAccess(baseUrl); // Autono security: the provider's own origin, requested from this click
 
       const newProvider = {
         id: provId,
@@ -6012,43 +6297,49 @@ marked.setOptions({
     if (settingDisplayMode) settingDisplayMode.value = s.displayMode || 'side_panel';
     if (s.selectedModel) selectModel(s.selectedModel);
 
-    const langInput = document.getElementById('settingAgentLanguage');
+    const langInput = settingEl('settingAgentLanguage');
     if (langInput && s.agentLanguage) langInput.value = s.agentLanguage;
 
-    const thinkingInput = document.getElementById('settingDefaultThinking');
+    const thinkingInput = settingEl('settingDefaultThinking');
     if (thinkingInput && s.defaultThinking) thinkingInput.value = s.defaultThinking;
 
-    const sysPromptInput = document.getElementById('settingSystemPrompt');
+    const sysPromptInput = settingEl('settingSystemPrompt');
     if (sysPromptInput && s.systemPrompt) sysPromptInput.value = s.systemPrompt;
 
-    const autonomyInput = document.getElementById('settingAutonomyMode');
+    const autonomyInput = settingEl('settingAutonomyMode');
     if (autonomyInput && s.autonomyMode) autonomyInput.value = s.autonomyMode;
+    // --- Autono security: code execution is off unless the user turned it on ---
+    allowCodeExecutionEnabled = s.allowCodeExecution === true;
+    refreshSiteAccessUi();
+    const allowCodeInput = settingEl('settingAllowCodeExecution');
+    if (allowCodeInput) allowCodeInput.checked = allowCodeExecutionEnabled;
+    // --- end ---
 
-    const visionInput = document.getElementById('settingVisionScreenshots');
+    const visionInput = settingEl('settingVisionScreenshots');
     if (visionInput && s.visionScreenshots !== undefined) visionInput.checked = Boolean(s.visionScreenshots);
 
-    const delayInput = document.getElementById('settingActionDelay');
+    const delayInput = settingEl('settingActionDelay');
     if (delayInput && s.actionDelay) delayInput.value = s.actionDelay;
 
-    const opacityInput = document.getElementById('settingGridOpacity');
+    const opacityInput = settingEl('settingGridOpacity');
     if (opacityInput && s.gridOpacity !== undefined) {
       opacityInput.value = s.gridOpacity;
       currentGridOpacity = parseFloat(s.gridOpacity);
     }
 
-    const squareInput = document.getElementById('settingSquareSize');
+    const squareInput = settingEl('settingSquareSize');
     if (squareInput && s.squareSize) {
       squareInput.value = s.squareSize;
       currentSquareSize = parseInt(s.squareSize, 10);
     }
 
-    const trailInput = document.getElementById('settingTrailDuration');
+    const trailInput = settingEl('settingTrailDuration');
     if (trailInput && s.trailDuration) {
       trailInput.value = s.trailDuration;
       currentTrailDecay = parseFloat(s.trailDuration);
     }
 
-    const soundInput = document.getElementById('settingCompletionSound');
+    const soundInput = settingEl('settingCompletionSound');
     if (soundInput && s.completionSound !== undefined) soundInput.checked = Boolean(s.completionSound);
 
     // Appearance settings restoration
@@ -6058,11 +6349,11 @@ marked.setOptions({
     if (s.colorTheme) applyTheme(s.colorTheme);
 
     // User Profile fields (Synchronized with onboarding localStorage)
-    const userNameInput = document.getElementById('settingUserName');
+    const userNameInput = settingEl('settingUserName');
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
     if (userNameInput) userNameInput.value = s.userName || savedLocalName;
 
-    const userNickInput = document.getElementById('settingUserNickname') || document.getElementById('settingUserNick');
+    const userNickInput = settingEl('settingUserNickname') || settingEl('settingUserNick');
     const savedLocalNick = localStorage.getItem('antigravity_user_nick') || '';
     if (userNickInput) userNickInput.value = s.userNickname || savedLocalNick;
 
@@ -6073,48 +6364,56 @@ marked.setOptions({
     }
 
     // Shadow Mode settings restoration
-    const shadowEnabledInput = document.getElementById('settingShadowEnabled');
+    const shadowEnabledInput = settingEl('settingShadowEnabled');
     if (shadowEnabledInput && s.shadowEnabled !== undefined) shadowEnabledInput.checked = Boolean(s.shadowEnabled);
 
-    const shadowPreventSleepInput = document.getElementById('settingShadowPreventSleep');
+    const shadowPreventSleepInput = settingEl('settingShadowPreventSleep');
     if (shadowPreventSleepInput && s.shadowPreventSleep !== undefined) {
       shadowPreventSleepInput.checked = Boolean(s.shadowPreventSleep);
       applyKeepAwake(shadowPreventSleepInput.checked);
     }
 
-    const shadowAutoWakeInput = document.getElementById('settingShadowAutoWake');
+    const shadowAutoWakeInput = settingEl('settingShadowAutoWake');
     if (shadowAutoWakeInput && s.shadowAutoWake !== undefined) shadowAutoWakeInput.checked = Boolean(s.shadowAutoWake);
 
-    const shadowOnCompleteInput = document.getElementById('settingShadowOnComplete');
+    const shadowOnCompleteInput = settingEl('settingShadowOnComplete');
     if (shadowOnCompleteInput && s.shadowOnComplete) shadowOnCompleteInput.value = s.shadowOnComplete;
 
     // Customization Mode settings
-    const tabGroupingInput = document.getElementById('settingTabGrouping');
+    const tabGroupingInput = settingEl('settingTabGrouping');
     if (tabGroupingInput && s.tabGrouping !== undefined) tabGroupingInput.checked = Boolean(s.tabGrouping);
 
-    const workingOverlayInput = document.getElementById('settingWorkingOverlay');
+    const workingOverlayInput = settingEl('settingWorkingOverlay');
     if (workingOverlayInput && s.workingOverlay !== undefined) workingOverlayInput.checked = Boolean(s.workingOverlay);
-    const multiAgentInput = document.getElementById('settingMultiAgent');
+    const multiAgentInput = settingEl('settingMultiAgent');
     if (multiAgentInput) multiAgentInput.checked = Boolean(s.multiAgent);
-    const mascotInput = document.getElementById('settingMascot');
+    const mascotInput = settingEl('settingMascot');
     if (mascotInput) mascotInput.checked = s.mascot !== false;
-    const agentConfirmInput = document.getElementById('settingAgentConfirm');
+    const agentConfirmInput = settingEl('settingAgentConfirm');
     if (agentConfirmInput) agentConfirmInput.checked = s.agentConfirm !== false;
+    // Autono security: opt-in switches (default off)
+    webSearchEnabled = s.webSearchEnabled === true;
+    const webSearchInput = document.getElementById('settingWebSearchEnabled');
+    if (webSearchInput) webSearchInput.checked = webSearchEnabled;
+    const fwdKeysInput = document.getElementById('settingForwardKeysToBridge');
+    if (fwdKeysInput) fwdKeysInput.checked = s.forwardKeysToBridge === true;
+    const autoExtInput = document.getElementById('settingAutoAllowExternalActions');
+    if (autoExtInput) autoExtInput.checked = s.autoAllowExternalActions === true;
 
-    const tabLockedSidebarInput = document.getElementById('settingTabLockedSidebar');
+    const tabLockedSidebarInput = settingEl('settingTabLockedSidebar');
     if (tabLockedSidebarInput && s.tabLockedSidebar !== undefined) tabLockedSidebarInput.checked = Boolean(s.tabLockedSidebar);
 
-    const waitInstantInput = document.getElementById('settingWaitMessageSentOutInstantly');
+    const waitInstantInput = settingEl('settingWaitMessageSentOutInstantly');
     if (waitInstantInput && s.waitMessageSentOutInstantly !== undefined) waitInstantInput.checked = Boolean(s.waitMessageSentOutInstantly);
 
     // Local Agent MCP Server (Active Browser Bridge)
-    const localMcpEnabledInput = document.getElementById('settingLocalMcpBridgeEnabled');
+    const localMcpEnabledInput = settingEl('settingLocalMcpBridgeEnabled');
     const savedLocalMcp = localStorage.getItem('autono_local_mcp_bridge_enabled');
     const isLocalMcpActive = s.localMcpBridgeEnabled !== undefined ? Boolean(s.localMcpBridgeEnabled) : (savedLocalMcp === 'true');
     if (localMcpEnabledInput) {
       localMcpEnabledInput.checked = isLocalMcpActive;
     }
-    const localMcpUrlInput = document.getElementById('settingLocalMcpUrl');
+    const localMcpUrlInput = settingEl('settingLocalMcpUrl');
     const savedLocalMcpUrl = s.localMcpUrl || localStorage.getItem('autono_local_mcp_url');
     if (localMcpUrlInput && savedLocalMcpUrl) {
       localMcpUrlInput.value = savedLocalMcpUrl;
@@ -6348,7 +6647,7 @@ marked.setOptions({
     try {
       localStorage.setItem('antigravity_border_beam', beamStyle || 'dynamic');
     } catch (_) {}
-    const el = document.getElementById('settingBorderBeamGlow');
+    const el = settingEl('settingBorderBeamGlow');
     if (el && el.value !== beamStyle) el.value = beamStyle;
   }
 
@@ -6357,7 +6656,7 @@ marked.setOptions({
     try {
       localStorage.setItem('antigravity_chat_font_size', fontSize || '14px');
     } catch (_) {}
-    const el = document.getElementById('settingChatFontSize');
+    const el = settingEl('settingChatFontSize');
     if (el && el.value !== fontSize) el.value = fontSize;
   }
 
@@ -6366,7 +6665,7 @@ marked.setOptions({
     try {
       localStorage.setItem('antigravity_chat_spacing', spacing || 'comfortable');
     } catch (_) {}
-    const el = document.getElementById('settingChatSpacing');
+    const el = settingEl('settingChatSpacing');
     if (el && el.value !== spacing) el.value = spacing;
   }
 
@@ -6378,17 +6677,17 @@ marked.setOptions({
     });
   });
 
-  const settingBorderBeamGlowEl = document.getElementById('settingBorderBeamGlow');
+  const settingBorderBeamGlowEl = settingEl('settingBorderBeamGlow');
   settingBorderBeamGlowEl?.addEventListener('change', () => {
     applyBorderBeam(settingBorderBeamGlowEl.value);
   });
 
-  const settingChatFontSizeEl = document.getElementById('settingChatFontSize');
+  const settingChatFontSizeEl = settingEl('settingChatFontSize');
   settingChatFontSizeEl?.addEventListener('change', () => {
     applyChatFontSize(settingChatFontSizeEl.value);
   });
 
-  const settingChatSpacingEl = document.getElementById('settingChatSpacing');
+  const settingChatSpacingEl = settingEl('settingChatSpacing');
   settingChatSpacingEl?.addEventListener('change', () => {
     applyChatSpacing(settingChatSpacingEl.value);
   });
@@ -6406,20 +6705,20 @@ marked.setOptions({
   } catch (_) {}
 
   // Realtime Grid Controls Sync
-  const settingGridOpacityEl = document.getElementById('settingGridOpacity');
+  const settingGridOpacityEl = settingEl('settingGridOpacity');
   if (settingGridOpacityEl) {
     settingGridOpacityEl.addEventListener('change', () => {
       currentGridOpacity = parseFloat(settingGridOpacityEl.value);
     });
   }
-  const settingSquareSizeEl = document.getElementById('settingSquareSize');
+  const settingSquareSizeEl = settingEl('settingSquareSize');
   if (settingSquareSizeEl) {
     settingSquareSizeEl.addEventListener('change', () => {
       currentSquareSize = parseInt(settingSquareSizeEl.value, 10);
       initBlueprintCanvas();
     });
   }
-  const settingTrailDurationEl = document.getElementById('settingTrailDuration');
+  const settingTrailDurationEl = settingEl('settingTrailDuration');
   if (settingTrailDurationEl) {
     settingTrailDurationEl.addEventListener('change', () => {
       currentTrailDecay = parseFloat(settingTrailDurationEl.value);
@@ -6505,9 +6804,21 @@ marked.setOptions({
 
   // ─── User Settings → Preferences: the same controls as the other tabs, kept in sync both ways ───
   // (the originals keep working and keep being what Save reads; these just change them)
+  // The mirrored controls are a fixed list (source id -> its "um_" twin), both looked up inside #settingsModal.
+  // Nothing is read from markup attributes at call time, so injected [data-mirror] elements are never touched.
+  const MIRROR_IDS = [
+    'settingAgentLanguage', 'dictationLangSelect', 'settingDefaultModel', 'settingDefaultThinking', 'settingBridgeUrl',
+    'settingTinyFishKey', 'whisperEngineSelect', 'piperAutoRead', 'settingMascot',
+  ];
+  const mirrorPairs = MIRROR_IDS.map((id) => ({
+    id,
+    mirror: settingsModal.querySelector('#um_' + id),
+    src: settingsModal.querySelector('#' + id),
+  }));
+
   function syncUserPrefs() {
-    document.querySelectorAll('[data-mirror]').forEach((mirror) => {
-      const src = document.getElementById(mirror.dataset.mirror);
+    mirrorPairs.forEach(({ mirror, src }) => {
+      if (!mirror) return;
       if (!src) { mirror.closest('.setting-field, .setting-field-toggle')?.classList.add('hidden'); return; }
       if (mirror.tagName === 'SELECT') {
         if (mirror.options.length !== src.options.length || mirror.dataset.sig !== Array.from(src.options).map((o) => o.value).join('|')) {
@@ -6523,9 +6834,8 @@ marked.setOptions({
     });
   }
 
-  document.querySelectorAll('[data-mirror]').forEach((mirror) => {
-    const src = document.getElementById(mirror.dataset.mirror);
-    if (!src) return;
+  mirrorPairs.forEach(({ mirror, src }) => {
+    if (!mirror || !src) return;
     const push = () => {
       if (mirror.type === 'checkbox') src.checked = mirror.checked;
       else src.value = mirror.value;
@@ -6545,8 +6855,8 @@ marked.setOptions({
   settingsBtn.addEventListener('click', () => {
     const savedLocalName = localStorage.getItem('antigravity_user_name') || '';
     const savedLocalNick = localStorage.getItem('antigravity_user_nick') || '';
-    const nameInp = document.getElementById('settingUserName');
-    const nickInp = document.getElementById('settingUserNickname');
+    const nameInp = settingEl('settingUserName');
+    const nickInp = settingEl('settingUserNickname');
     if (nameInp && !nameInp.value && savedLocalName) nameInp.value = savedLocalName;
     if (nickInp && !nickInp.value && savedLocalNick) nickInp.value = savedLocalNick;
     settingsModal.classList.remove('hidden');
@@ -6557,12 +6867,12 @@ marked.setOptions({
     renderPricingSettings();
     piperRefresh();
     renderWhisperSettings();
-    checkForUpdates({ force: false });
+    if (updateCheckDue()) checkForUpdates({ force: false }); // Autono security (A21)
     syncUserPrefs();
   });
 
   // The mascot switch applies immediately (no need to press Save)
-  document.getElementById('settingMascot')?.addEventListener('change', (e) => {
+  settingEl('settingMascot')?.addEventListener('change', (e) => {
     const on = e.target.checked;
     chrome.storage.local.get(['antigravity_settings'], (res) => {
       const prev = res.antigravity_settings || {};
@@ -6582,9 +6892,9 @@ marked.setOptions({
   });
 
   function saveAllSettings() {
-    const rawSysPrompt = document.getElementById('settingSystemPrompt')?.value || '';
-    const userNick = (document.getElementById('settingUserNickname') || document.getElementById('settingUserNick'))?.value?.trim() || '';
-    const userName = document.getElementById('settingUserName')?.value?.trim() || '';
+    const rawSysPrompt = settingEl('settingSystemPrompt')?.value || '';
+    const userNick = (settingEl('settingUserNickname') || settingEl('settingUserNick'))?.value?.trim() || '';
+    const userName = settingEl('settingUserName')?.value?.trim() || '';
 
     // Guarantee strict subagent prohibition and user name preference
     let enrichedSysPrompt = rawSysPrompt;
@@ -6612,16 +6922,27 @@ marked.setOptions({
     currentOpenaiApiKey = openaiApiKeyVal || '';
 
     try {
+      // Autono security (A11): modes only; API keys are no longer duplicated in localStorage
       localStorage.setItem('antigravity_antigravity_mode', currentAntigravityMode);
-      localStorage.setItem('antigravity_gemini_api_key', currentGeminiApiKey);
       localStorage.setItem('antigravity_claude_mode', currentClaudeMode);
-      localStorage.setItem('antigravity_anthropic_api_key', currentAnthropicApiKey);
       localStorage.setItem('antigravity_openai_mode', currentOpenaiMode);
-      localStorage.setItem('antigravity_openai_api_key', currentOpenaiApiKey);
     } catch (_) {}
 
+    // Autono security (A20): Bridge URL must be http(s), http only on loopback, no credentials
+    const bridgeUrlCheck = AS.parseBridgeUrl(settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765');
+    if (!bridgeUrlCheck.ok) {
+      showToast(bridgeUrlCheck.error === 'insecure_http'
+        ? 'Bridge URL rejected: http is only allowed for 127.0.0.1 / localhost. Use https for a remote Bridge.'
+        : 'Bridge URL rejected: it must be a plain http(s) address without credentials.');
+      return;
+    }
+    if (bridgeUrlCheck.warning) {
+      showToast(`Warning: the Bridge at ${bridgeUrlCheck.host} is not on this computer. Prompts, page content and screenshots will be sent there.`);
+    }
+    if (settingBridgeUrl) settingBridgeUrl.value = bridgeUrlCheck.url;
+
     const newSettings = {
-      bridgeUrl: settingBridgeUrl?.value.trim() || 'http://127.0.0.1:8765',
+      bridgeUrl: bridgeUrlCheck.url,
       selectedModel: settingDefaultModel?.value || currentModel,
       maxSteps: parseInt(settingMaxSteps?.value, 10) || 30,
       tinyFishApiKey: settingTinyFishKey ? settingTinyFishKey.value.trim() : '',
@@ -6632,32 +6953,36 @@ marked.setOptions({
       anthropicApiKey: currentAnthropicApiKey,
       openaiMode: currentOpenaiMode,
       openaiApiKey: currentOpenaiApiKey,
-      agentLanguage: document.getElementById('settingAgentLanguage')?.value || 'en',
-      defaultThinking: document.getElementById('settingDefaultThinking')?.value || 'medium',
+      agentLanguage: settingEl('settingAgentLanguage')?.value || 'en',
+      defaultThinking: settingEl('settingDefaultThinking')?.value || 'medium',
       systemPrompt: enrichedSysPrompt,
-      autonomyMode: document.getElementById('settingAutonomyMode')?.value || 'supervised',
-      visionScreenshots: document.getElementById('settingVisionScreenshots')?.checked ?? true,
-      actionDelay: parseInt(document.getElementById('settingActionDelay')?.value || '350', 10),
-      gridOpacity: document.getElementById('settingGridOpacity')?.value || '0.065',
-      squareSize: parseInt(document.getElementById('settingSquareSize')?.value || '44', 10),
-      trailDuration: document.getElementById('settingTrailDuration')?.value || '0.022',
-      completionSound: document.getElementById('settingCompletionSound')?.checked ?? true,
-      borderBeamGlow: document.getElementById('settingBorderBeamGlow')?.value || 'dynamic',
-      chatFontSize: document.getElementById('settingChatFontSize')?.value || '14px',
-      chatSpacing: document.getElementById('settingChatSpacing')?.value || 'comfortable',
+      autonomyMode: settingEl('settingAutonomyMode')?.value || 'supervised',
+      allowCodeExecution: settingEl('settingAllowCodeExecution')?.checked === true, // Autono security
+      visionScreenshots: settingEl('settingVisionScreenshots')?.checked ?? true,
+      actionDelay: parseInt(settingEl('settingActionDelay')?.value || '350', 10),
+      gridOpacity: settingEl('settingGridOpacity')?.value || '0.065',
+      squareSize: parseInt(settingEl('settingSquareSize')?.value || '44', 10),
+      trailDuration: settingEl('settingTrailDuration')?.value || '0.022',
+      completionSound: settingEl('settingCompletionSound')?.checked ?? true,
+      borderBeamGlow: settingEl('settingBorderBeamGlow')?.value || 'dynamic',
+      chatFontSize: settingEl('settingChatFontSize')?.value || '14px',
+      chatSpacing: settingEl('settingChatSpacing')?.value || 'comfortable',
       colorTheme: localStorage.getItem('antigravity_theme') || 'cyan',
-      shadowEnabled: document.getElementById('settingShadowEnabled')?.checked ?? true,
-      shadowPreventSleep: document.getElementById('settingShadowPreventSleep')?.checked ?? true,
-      shadowAutoWake: document.getElementById('settingShadowAutoWake')?.checked ?? true,
-      shadowOnComplete: document.getElementById('settingShadowOnComplete')?.value || 'sleep',
-      tabGrouping: document.getElementById('settingTabGrouping')?.checked ?? true,
-      workingOverlay: document.getElementById('settingWorkingOverlay')?.checked ?? true,
-      multiAgent: document.getElementById('settingMultiAgent')?.checked ?? false,
-      agentConfirm: document.getElementById('settingAgentConfirm')?.checked ?? true,
-      mascot: document.getElementById('settingMascot')?.checked ?? true,
-      tabLockedSidebar: document.getElementById('settingTabLockedSidebar')?.checked ?? false,
-      waitMessageSentOutInstantly: document.getElementById('settingWaitMessageSentOutInstantly')?.checked ?? true,
-      localMcpBridgeEnabled: document.getElementById('settingLocalMcpBridgeEnabled')?.checked ?? false,
+      shadowEnabled: settingEl('settingShadowEnabled')?.checked ?? false,
+      shadowPreventSleep: settingEl('settingShadowPreventSleep')?.checked ?? true,
+      shadowAutoWake: settingEl('settingShadowAutoWake')?.checked ?? true,
+      shadowOnComplete: settingEl('settingShadowOnComplete')?.value || 'none',
+      webSearchEnabled: settingEl('settingWebSearchEnabled')?.checked ?? false,
+      forwardKeysToBridge: settingEl('settingForwardKeysToBridge')?.checked ?? false,
+      autoAllowExternalActions: settingEl('settingAutoAllowExternalActions')?.checked ?? false,
+      tabGrouping: settingEl('settingTabGrouping')?.checked ?? true,
+      workingOverlay: settingEl('settingWorkingOverlay')?.checked ?? true,
+      multiAgent: settingEl('settingMultiAgent')?.checked ?? false,
+      agentConfirm: settingEl('settingAgentConfirm')?.checked ?? true,
+      mascot: settingEl('settingMascot')?.checked ?? true,
+      tabLockedSidebar: settingEl('settingTabLockedSidebar')?.checked ?? false,
+      waitMessageSentOutInstantly: settingEl('settingWaitMessageSentOutInstantly')?.checked ?? true,
+      localMcpBridgeEnabled: settingEl('settingLocalMcpBridgeEnabled')?.checked ?? false,
       localMcpUrl: getFullMcpSseUrl(),
       userName,
       userNickname: userNick,
@@ -6665,6 +6990,8 @@ marked.setOptions({
     };
 
     tinyFishApiKey = newSettings.tinyFishApiKey;
+    webSearchEnabled = newSettings.webSearchEnabled === true; // Autono security: applies without reconnecting
+    allowCodeExecutionEnabled = newSettings.allowCodeExecution === true;
     currentGridOpacity = parseFloat(newSettings.gridOpacity);
     currentSquareSize = newSettings.squareSize;
     currentTrailDecay = parseFloat(newSettings.trailDuration);
@@ -6677,29 +7004,36 @@ marked.setOptions({
     }
 
     try {
-      localStorage.setItem('antigravity_settings', JSON.stringify(newSettings));
+      // Autono security (A11): the localStorage copy never holds secrets
+      const publicCopy = { ...newSettings };
+      for (const k of ['geminiApiKey', 'anthropicApiKey', 'openaiApiKey', 'tinyFishApiKey']) delete publicCopy[k];
+      localStorage.setItem('antigravity_settings', JSON.stringify(publicCopy));
     } catch (_) {}
 
-    localStorage.setItem('autono_local_mcp_bridge_enabled', String(newSettings.localMcpBridgeEnabled));
     localStorage.setItem('autono_local_mcp_url', newSettings.localMcpUrl);
     chrome.storage.local.set({ autono_local_mcp_url: newSettings.localMcpUrl });
     updateLocalMcpStatusUI(newSettings.localMcpBridgeEnabled);
     refreshMcpSnippet();
 
+    // the background keeps the remote-control toggle as it is: it changes only via 'mcp_bridge_set'
     sendPortMessage({ type: 'save_settings', settings: newSettings });
 
+    // Autono security (A11): provider keys go to the Bridge only if the user opted in
     const bridgeUrl = (newSettings.bridgeUrl || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+    const configBody = {
+      antigravity_mode: currentAntigravityMode,
+      claude_mode: currentClaudeMode,
+      openai_mode: currentOpenaiMode,
+    };
+    if (newSettings.forwardKeysToBridge) {
+      configBody.gemini_api_key = currentGeminiApiKey;
+      configBody.anthropic_api_key = currentAnthropicApiKey;
+      configBody.openai_api_key = currentOpenaiApiKey;
+    }
     fetch(`${bridgeUrl}/api/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        antigravity_mode: currentAntigravityMode,
-        gemini_api_key: currentGeminiApiKey,
-        claude_mode: currentClaudeMode,
-        anthropic_api_key: currentAnthropicApiKey,
-        openai_mode: currentOpenaiMode,
-        openai_api_key: currentOpenaiApiKey,
-      }),
+      body: JSON.stringify(configBody),
     }).catch(() => null);
     applyKeepAwake(newSettings.shadowPreventSleep);
     selectModel(newSettings.selectedModel);
@@ -6749,7 +7083,7 @@ marked.setOptions({
   const shadowTestWakeBtn = document.getElementById('shadowTestWakeBtn');
   const shadowCancelShutdownBtn = document.getElementById('shadowCancelShutdownBtn');
   const shadowActionFeedback = document.getElementById('shadowActionFeedback');
-  const settingShadowPreventSleep = document.getElementById('settingShadowPreventSleep');
+  const settingShadowPreventSleep = settingEl('settingShadowPreventSleep');
   let shutdownCountdownTimer = null;
 
   function showShadowFeedback(msg, isError = false) {
@@ -7260,16 +7594,16 @@ You are a world-class principal software engineer.
       } catch (_) {}
 
       // Update Settings fields as well
-      const settingName = document.getElementById('settingUserName');
+      const settingName = settingEl('settingUserName');
       if (settingName) settingName.value = name;
-      const settingNick = document.getElementById('settingUserNickname');
+      const settingNick = settingEl('settingUserNickname');
       if (settingNick) settingNick.value = nickname;
       if (settingBridgeUrl) settingBridgeUrl.value = bridgeUrl;
       if (settingTinyFishKey && tinyKey) {
         settingTinyFishKey.value = tinyKey;
         tinyFishApiKey = tinyKey;
       }
-      const langInput = document.getElementById('settingAgentLanguage');
+      const langInput = settingEl('settingAgentLanguage');
       if (langInput) langInput.value = selectedOnboardLang;
 
       // Update header auth button label
@@ -7751,7 +8085,7 @@ You are a world-class principal software engineer.
     const { bridge, extension } = updateState;
     const version = chrome.runtime.getManifest().version;
     const parts = [
-      `Autono ${version}: ${extension?.error ? extension.error : extension?.update_available ? 'a new version is available' : 'up to date'}`,
+      `Autono ${version}${extension?.current ? ` (commit ${shortSha(extension.current)})` : ''}: ${extension?.error ? extension.error : extension?.update_available ? `a new version is available (commit ${shortSha(extension.latest)}). Updating REPLACES this extension with the latest code from GitHub.` : 'up to date'}`,
       `Bridge: ${bridge?.error ? bridge.error : bridge?.update_available ? 'a new version is available' : 'up to date'}`,
     ];
     const pending = Boolean(extension?.update_available || bridge?.update_available);
@@ -7770,9 +8104,29 @@ You are a world-class principal software engineer.
     banner?.classList.toggle('hidden', !(pending && dismissed !== key) && !updateBusy);
   }
 
+  // --- Autono security (A21): store builds update through the store; the self-updater is hidden there ---
+  const STORE_MANAGED_UPDATES = Boolean(chrome.runtime.getManifest().update_url);
+  const UPDATE_LAST_CHECK_KEY = 'autono_last_update_check';
+  if (STORE_MANAGED_UPDATES) {
+    for (const id of ['updateBanner', 'updateApplyBtn', 'updateCheckBtn', 'updatePathInput', 'updateStatusLines', 'updateProgress']) {
+      const el = document.getElementById(id);
+      if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
+    }
+  }
+  // at most one automatic check per 24 h; a click on "Check" always checks
+  function updateCheckDue() {
+    try {
+      const last = Number(localStorage.getItem(UPDATE_LAST_CHECK_KEY) || 0);
+      return !last || Date.now() - last > 24 * 60 * 60 * 1000;
+    } catch (_) { return false; }
+  }
+  // --- end ---
+
   async function checkForUpdates({ force = false, silent = false } = {}) {
     const line = document.getElementById('updateStatusLines');
+    if (STORE_MANAGED_UPDATES) return;
     if (updateBusy) return;
+    try { localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(Date.now())); } catch (_) { /* ignore */ }
     if (!silent && line) { line.textContent = 'Checking…'; line.className = 'piper-status'; }
     try {
       const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
@@ -7843,6 +8197,19 @@ You are a world-class principal software engineer.
     if (updateBusy || !updateState) return;
     const doExt = Boolean(updateState.extension?.update_available);
     const doBridge = Boolean(updateState.bridge?.update_available);
+    // --- Autono security (A21): explicit confirmation, with version / commit and what it means ---
+    if (doExt || doBridge) {
+      const cur = chrome.runtime.getManifest().version;
+      const what = [];
+      if (doExt) what.push(`Autono ${cur} -> commit ${shortSha(updateState.extension?.latest)}`);
+      if (doBridge) what.push(`Bridge -> commit ${shortSha(updateState.bridge?.latest)}`);
+      const okUpdate = window.confirm(
+        `Update now?\n\n${what.join('\n')}\n\nThis downloads the latest code from GitHub and REPLACES the installed extension` +
+        `${doBridge ? ' and Bridge' : ''} with it. The code is not signature-checked by the extension. Only continue if you trust the source.`
+      );
+      if (!okUpdate) return;
+    }
+    // --- end ---
     updateBusy = true;
     document.getElementById('updateBanner')?.classList.remove('hidden');
     const folder = (localStorage.getItem(UPDATE_PATH_KEY) || '').trim();
@@ -7901,7 +8268,8 @@ You are a world-class principal software engineer.
     }
     chrome.storage.local.remove('autono_just_updated');
   });
-  setTimeout(() => checkForUpdates({ force: true, silent: true }), 2500);
+  // Autono security (A21): no forced check on every panel open; at most one quiet check per 24 h
+  if (updateCheckDue()) setTimeout(() => checkForUpdates({ force: false, silent: true }), 2500);
 
   function loadPriceOverrides() {
     try {
@@ -8166,7 +8534,7 @@ You are a world-class principal software engineer.
     if (!text || isGenerating) return;
     promptInput.value = text;
     handleInputStateChange();
-    handleSend();
+    handleSend({ noSearch: true }); // approval-card answers / cowork_request goals are model-authored (A18/A22)
   }
 
   function triggerCoworkExecution(goalText) {
@@ -8179,7 +8547,7 @@ You are a world-class principal software engineer.
   }
 
   // ─── ApprovalCard (Human-in-the-Loop) Mount & Interactivity ─────────────────
-  function mountAllApprovalCards(container = document) {
+  function mountAllApprovalCards(container = document, inert = false) {
     if (!container) return;
     const mounts = container.querySelectorAll('.approval-card-mount:not([data-mounted="true"])');
     mounts.forEach((el) => {
@@ -8187,11 +8555,87 @@ You are a world-class principal software engineer.
       const cardData = activeApprovalCards.get(cardId);
       if (!cardData) return;
       el.setAttribute('data-mounted', 'true');
+      if (inert) {
+        // --- Autono security: a saved card never becomes interactive again ---
+        el.textContent = 'This question has expired. Send a new request if you still want it.';
+        el.classList.add('approval-card-expired');
+        return;
+      }
       mountApprovalCard(el, cardData);
     });
   }
 
+  // --- Autono security: fixed, extension-authored Cowork confirmation (ignores model-written questions/options) ---
+  function mountCoworkRequestCard(containerEl, cardData) {
+    const goal = typeof cardData.goal === 'string' ? cardData.goal.trim() : '';
+    containerEl.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'agent-permission-card action-permission-card';
+    const title = document.createElement('div');
+    title.className = 'agent-permission-title';
+    title.textContent = 'Start Cowork on this goal?';
+    const goalLabel = document.createElement('div');
+    goalLabel.className = 'action-perm-label';
+    goalLabel.textContent = 'Goal (exactly what the agent will be told to do)';
+    const goalBox = document.createElement('pre');
+    goalBox.className = 'action-perm-goal';
+    goalBox.textContent = goal || '(the assistant did not provide a goal)';
+    const originLine = document.createElement('div');
+    originLine.className = 'action-perm-label';
+    originLine.textContent = 'Current tab: checking...';
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        let o = 'unknown';
+        try { o = new URL(tabs && tabs[0] && tabs[0].url).origin; } catch (e) { /* internal page */ }
+        originLine.textContent = `Current tab: ${o}`;
+      });
+    } catch (e) { originLine.textContent = 'Current tab: unknown'; }
+    const note = document.createElement('div');
+    note.className = 'agent-permission-warning';
+    note.textContent = 'Cowork clicks and types in your browser using your logged-in sessions. You will still be asked before sensitive actions.';
+    const actions = document.createElement('div');
+    actions.className = 'agent-permission-actions';
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'agent-perm-btn allow';
+    startBtn.textContent = 'Start Cowork';
+    startBtn.disabled = !goal;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'agent-perm-btn';
+    cancelBtn.textContent = 'Cancel';
+    const done = (text) => {
+      containerEl.textContent = '';
+      const r = document.createElement('div');
+      r.className = 'agent-permission-card resolved';
+      r.textContent = text;
+      containerEl.appendChild(r);
+    };
+    startBtn.addEventListener('click', () => {
+      if (startBtn.disabled) return;
+      startBtn.disabled = true;
+      cancelBtn.disabled = true;
+      done('Cowork started');
+      triggerCoworkExecution(goal);
+    });
+    cancelBtn.addEventListener('click', () => {
+      startBtn.disabled = true;
+      done('Cowork cancelled');
+      showToast('Continuing in standard conversation mode');
+    });
+    actions.append(startBtn, cancelBtn);
+    box.append(title, goalLabel, goalBox, originLine, note, actions);
+    containerEl.appendChild(box);
+  }
+  // --- end ---
+
   function mountApprovalCard(containerEl, cardData) {
+    // --- Autono security: cowork_request never uses the model's questions or options ---
+    if (cardData && cardData.action === 'cowork_request') {
+      mountCoworkRequestCard(containerEl, cardData);
+      return;
+    }
+    // --- end ---
     const questions = Array.isArray(cardData.questions) && cardData.questions.length > 0
       ? cardData.questions
       : [{
@@ -8384,18 +8828,7 @@ You are a world-class principal software engineer.
       sent = true;
       render();
 
-      if (cardData.action === 'cowork_request') {
-        const picked = answers[0] || [];
-        const customText = (custom[0] || '').toLowerCase();
-        const isAffirmative = picked.includes(0) || customText.includes('yes') || customText.includes('sí') || customText.includes('si') || customText.includes('start') || customText.includes('enable');
-
-        if (isAffirmative) {
-          const goal = cardData.goal || 'Execute browser automation actions';
-          triggerCoworkExecution(goal);
-        } else {
-          showToast('Continuing in standard conversation mode');
-        }
-      } else {
+      {
         const formatted = [];
         questions.forEach((qu, i) => {
           const selectedIndices = answers[i] || [];
@@ -8405,9 +8838,12 @@ You are a world-class principal software engineer.
           formatted.push(`- **${qu.q}**: ${chosenOpts.join(', ') || 'No answer'}`);
         });
         const responseText = `I have selected the following options:\n${formatted.join('\n')}`;
-        setTimeout(() => {
-          sendUserMessage(responseText);
-        }, 500);
+        // --- Autono security: the answer is placed in the message box for the user to read and send; it is never auto-sent ---
+        promptInput.value = responseText;
+        promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+        promptInput.focus();
+        showToast('Review your answer and press send');
+        // --- end ---
       }
     }
 
@@ -8574,12 +9010,13 @@ You are a world-class principal software engineer.
   }
 
   function downloadPdfDocument(filename, title, content) {
-    const renderedBody = content.startsWith('<') ? content : marked.parse(content);
+    const renderedBody = sanitizeHtml(content.startsWith('<') ? content : marked.parse(content));
     const printDoc = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${title || filename}</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <title>${escapeText(title || filename)}</title>
   <style>
     @page { size: A4; margin: 18mm; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.6; margin: 0; padding: 24px; }
@@ -8600,6 +9037,7 @@ You are a world-class principal software engineer.
 </html>`;
     const blob = new Blob([printDoc], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
     const win = window.open(url, '_blank');
     if (win) {
       win.addEventListener('load', () => {
@@ -8618,11 +9056,11 @@ You are a world-class principal software engineer.
   }
 
   function downloadDocxDocument(filename, title, content) {
-    const renderedBody = content.startsWith('<') ? content : marked.parse(content);
+    const renderedBody = sanitizeHtml(content.startsWith('<') ? content : marked.parse(content));
     const wordDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head>
   <meta charset="utf-8">
-  <title>${title || filename}</title>
+  <title>${escapeText(title || filename)}</title>
   <!--[if gte mso 9]>
   <xml>
     <w:WordDocument>
@@ -8658,6 +9096,110 @@ You are a world-class principal software engineer.
     showToast(`✓ Word document downloaded: ${a.download}`);
   }
 
+  // --- Autono security: page access (<all_urls>) is an optional permission requested at first use ---
+  const SITE_ACCESS = { origins: ['<all_urls>'] };
+  let siteAccessDeclined = false;
+  async function hasSiteAccess() {
+    try { return await chrome.permissions.contains(SITE_ACCESS); } catch (_) { return false; }
+  }
+  // Must run inside a user gesture (a click or Enter in this page): it is called at the top of handleSend
+  async function ensureSiteAccess() {
+    if (siteAccessDeclined || (await hasSiteAccess())) return;
+    let granted = false;
+    try { granted = await chrome.permissions.request(SITE_ACCESS); } catch (_) { granted = false; }
+    if (!granted) {
+      siteAccessDeclined = true;
+      showToast('Page access was not granted: Autono will not read pages or act on them. You can grant it in Settings.');
+    }
+    refreshSiteAccessUi();
+  }
+  // Other servers (a custom provider or a remote Bridge) need their own permission to be reachable from here
+  function ensureOriginAccess(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return;
+      const h = u.hostname;
+      if (h === '127.0.0.1' || h === 'localhost' || h === '[::1]') return;
+      chrome.permissions.request({ origins: [u.origin + '/*'] }).catch(() => null);
+    } catch (_) { /* invalid URL: validation happens elsewhere */ }
+  }
+  async function refreshSiteAccessUi() {
+    const status = settingEl('siteAccessStatus');
+    const grantBtn = settingEl('siteAccessGrantBtn');
+    const revokeBtn = settingEl('siteAccessRevokeBtn');
+    if (!status) return;
+    const has = await hasSiteAccess();
+    status.textContent = has ? 'Granted: Autono can read and act on the pages you ask it about.' : 'Not granted: Autono cannot read pages until you allow it.';
+    if (grantBtn) grantBtn.classList.toggle('hidden', has);
+    if (revokeBtn) revokeBtn.classList.toggle('hidden', !has);
+  }
+  function wireSiteAccessUi() {
+    const grantBtn = settingEl('siteAccessGrantBtn');
+    const revokeBtn = settingEl('siteAccessRevokeBtn');
+    if (grantBtn) grantBtn.addEventListener('click', async () => {
+      siteAccessDeclined = false;
+      try { await chrome.permissions.request(SITE_ACCESS); } catch (_) { /* declined */ }
+      refreshSiteAccessUi();
+    });
+    if (revokeBtn) revokeBtn.addEventListener('click', async () => {
+      try { await chrome.permissions.remove(SITE_ACCESS); } catch (_) { /* nothing to remove */ }
+      siteAccessDeclined = true;
+      refreshSiteAccessUi();
+    });
+    try {
+      chrome.permissions.onAdded.addListener(refreshSiteAccessUi);
+      chrome.permissions.onRemoved.addListener(refreshSiteAccessUi);
+    } catch (_) { /* older Chrome */ }
+    refreshSiteAccessUi();
+  }
+  wireSiteAccessUi();
+  // --- end ---
+
+  // --- Autono security: per-run confirmation that shows the full code ---
+  function confirmCodeRun(lang, code, tainted = true) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'code-run-modal-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      const box = document.createElement('div');
+      box.className = 'code-run-modal';
+      box.appendChild(apEl('div', 'agent-permission-title', `Run this ${lang} code?`));
+      box.appendChild(apEl('div', 'agent-permission-warning', 'This runs on your computer through the Bridge, with your user permissions. Read all of it first.'));
+      if (tainted) {
+        box.appendChild(apEl('div', 'agent-permission-warning', 'This answer was written while a web page or search results were in context, so this code may have been steered by that content. Only run it if you understand every line.'));
+      }
+      box.appendChild(apEl('pre', 'action-perm-goal code-run-code', code));
+      const actions = apEl('div', 'agent-permission-actions');
+      const finish = (v) => { overlay.remove(); resolve(v); };
+      let ackBox = null;
+      if (tainted) {
+        const ackLabel = document.createElement('label');
+        ackLabel.className = 'code-run-ack';
+        ackBox = document.createElement('input');
+        ackBox.type = 'checkbox';
+        ackLabel.append(ackBox, document.createTextNode(' I read all of the code above and I trust it'));
+        box.appendChild(ackLabel);
+      }
+      const run = apEl('button', 'agent-perm-btn allow', 'Run on my computer');
+      run.type = 'button';
+      if (ackBox) {
+        run.disabled = true;
+        ackBox.addEventListener('change', () => { run.disabled = !ackBox.checked; });
+      }
+      run.addEventListener('click', () => finish(true));
+      const cancel = apEl('button', 'agent-perm-btn', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => finish(false));
+      actions.append(run, cancel);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      cancel.focus();
+    });
+  }
+  // --- end ---
+
   async function executeCodeArtifact(artifact, consoleEl, previewEl) {
     if (!artifact) return;
     const { lang, content, type } = artifact;
@@ -8684,37 +9226,39 @@ You are a world-class principal software engineer.
           previewEl.innerHTML = '';
         } else {
           previewEl.classList.remove('hidden');
-          previewEl.innerHTML = content;
+          // An <img> never runs scripts nor loads anything external, unlike inline <svg> in the privileged panel
+          const img = document.createElement('img');
+          img.alt = 'SVG preview';
+          img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(content);
+          previewEl.appendChild(img);
         }
       }
       return;
     }
 
-    if (lang === 'javascript' || lang === 'js') {
-      if (!consoleEl) return;
-      consoleEl.classList.remove('hidden');
-      consoleEl.classList.remove('error');
-      consoleEl.textContent = '⏳ Running JavaScript...';
-      const logs = [];
-      const fakeConsole = {
-        log: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        error: (...args) => logs.push('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        warn: (...args) => logs.push('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-      };
-      try {
-        const runFn = new Function('console', content);
-        const result = runFn(fakeConsole);
-        if (result !== undefined) logs.push(`=> ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`);
-        consoleEl.textContent = logs.length > 0 ? logs.join('\n') : '✓ Executed successfully — no console output';
-      } catch (err) {
-        consoleEl.classList.add('error');
-        consoleEl.textContent = `❌ Execution error: ${err.message}`;
+    // --- Autono security: Markdown preview is local text only (never sent to the Bridge); dead new Function() path removed ---
+    if (type === 'markdown' || lang === 'md' || lang === 'markdown' || artifact.ext === 'md') {
+      if (previewEl) {
+        const isShown = !previewEl.classList.contains('hidden');
+        previewEl.classList.toggle('hidden', isShown);
+        previewEl.textContent = isShown ? '' : content;
       }
       return;
     }
+    // --- end ---
 
-    // Python / Bash / Shell via AntigravityBridge
+    // Python / Bash / Shell / JavaScript via AntigravityBridge (explicitly enabled and confirmed per run)
     if (!consoleEl) return;
+    // --- Autono security: code execution gate ---
+    if (!allowCodeExecutionEnabled) {
+      consoleEl.classList.remove('hidden');
+      consoleEl.classList.add('error');
+      consoleEl.textContent = 'Running code is turned off in Settings. Copy the code and review it before running it yourself.';
+      return;
+    }
+    const confirmedRun = await confirmCodeRun(lang, content, artifact.tainted !== false);
+    if (!confirmedRun) return;
+    // --- end ---
     consoleEl.classList.remove('hidden');
     consoleEl.classList.remove('error');
     consoleEl.textContent = `⏳ Running ${lang} via AntigravityBridge...`;
@@ -8756,6 +9300,10 @@ You are a world-class principal software engineer.
 
     const artifacts = extractFileArtifacts(rawText);
     if (!artifacts || artifacts.length === 0) return;
+    // --- Autono security: the open page is part of almost every turn, so every artifact is treated as possibly steered
+    // by web content: running it needs the setting, the full-code dialog AND an explicit "I read it" acknowledgment. ---
+    artifacts.forEach((a) => { a.tainted = true; });
+    // --- end ---
 
     const artifactsContainer = document.createElement('div');
     artifactsContainer.className = 'file-artifacts-container';
@@ -8792,7 +9340,7 @@ You are a world-class principal software engineer.
             <span>Vista Previa</span>
           </button>
           ` : ''}
-          ${['py', 'python', 'js', 'javascript', 'html', 'svg', 'sh', 'bash'].includes(art.lang) ? `
+          ${allowCodeExecutionEnabled && ['py', 'python', 'js', 'javascript', 'sh', 'bash'].includes(art.lang) ? `
           <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <span>Ejecutar</span>
@@ -8881,7 +9429,7 @@ You are a world-class principal software engineer.
               title,
               url,
               domain,
-              favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+              favicon: '', // Autono security (A22): no favicon service
             });
           } catch (e) {}
         }
@@ -9040,10 +9588,12 @@ You are a world-class principal software engineer.
       sourcesBtn.type = 'button';
       sourcesBtn.className = 'streaming-sources-trigger';
 
-      const favs = finalSources.slice(0, 3).map((s) => {
-        const fav = s.favicon || (s.url ? `https://www.google.com/s2/favicons?domain=${new URL(s.url).hostname}&sz=32` : '');
-        return fav ? `<img src="${fav}" alt="" class="citation-fav-img">` : '<span class="fav-placeholder"></span>';
-      }).join('');
+      // Autono security (A22): letter avatar, no <img> and no request to a favicon service
+      const avatarLetter = (s) => {
+        const t = String(s.domain || s.title || s.url || '?').replace(/^https?:\/\/(www\.)?/, '');
+        return escapeHtml((t.charAt(0) || '?').toUpperCase());
+      };
+      const favs = finalSources.slice(0, 3).map((s) => `<span class="fav-placeholder">${avatarLetter(s)}</span>`).join('');
 
       sourcesBtn.innerHTML = `
         <span class="citation-favicons">${favs}</span>
@@ -9057,10 +9607,9 @@ You are a world-class principal software engineer.
       drawer.className = 'streaming-sources-drawer hidden';
       drawer.innerHTML = finalSources.map((s) => {
         const domain = s.domain || (s.url ? new URL(s.url).hostname.replace(/^www\./, '') : 'web');
-        const fav = s.favicon || (s.url ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : '');
         return `
           <a href="${escapeHtml(s.url || '#')}" target="_blank" rel="noopener noreferrer" class="citation-card">
-            ${fav ? `<img src="${fav}" alt="" class="citation-card-fav">` : ''}
+            <span class="fav-placeholder">${avatarLetter(s)}</span>
             <div class="citation-card-info">
               <div class="citation-card-title">${escapeHtml(s.title || domain)}</div>
               <div class="citation-card-domain">${escapeHtml(domain)}</div>
@@ -9295,43 +9844,135 @@ You are a world-class principal software engineer.
   }
 
   // Asks the user before the assistant creates agents; the answer goes back to the background worker
+  // --- Autono security: honest card (start origin, full task via textContent, "for this task only") ---
+  function apEl(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
   function showAgentPermissionCard(req) {
     welcomeHero.classList.add('hidden');
     messagesContainer.classList.remove('hidden');
-    const card = document.createElement('div');
-    card.className = 'agent-permission-card';
-    const list = (req.agents || []).slice(0, 12).map((a) => `<li><strong>${escapeHtml(a.name)}</strong>${a.task ? ` <span>${escapeHtml(a.task)}</span>` : ''}</li>`).join('');
-    const more = (req.count || 0) > 12 ? `<li class="more">and ${(req.count || 0) - 12} more...</li>` : '';
-    card.innerHTML = `
-      <div class="agent-permission-title">Create ${req.count} agent${req.count === 1 ? '' : 's'}?</div>
-      <ul class="agent-permission-list">${list}${more}</ul>
-      <div class="agent-permission-warning">Every agent makes its own model calls (in Cowork it also opens its own browser tab). This can use a lot of tokens.</div>
-      <div class="agent-permission-actions">
-        <button type="button" data-act="allow" class="agent-perm-btn allow">Allow</button>
-        <button type="button" data-act="deny" class="agent-perm-btn">Deny</button>
-        <button type="button" data-act="always" class="agent-perm-btn subtle" title="Stop asking from now on (you can turn it back on in Settings)">Allow and don't ask again</button>
-      </div>`;
+    const card = apEl('div', 'agent-permission-card');
+    const count = req.count || (req.agents || []).length;
+    card.appendChild(apEl('div', 'agent-permission-title', `Create ${count} agent${count === 1 ? '' : 's'}?`));
+    const lim = req.limits || {};
+    card.appendChild(apEl('div', 'agent-permission-warning', lim.usesBrowser === false
+      ? `Each agent makes its own model calls (no browser). Helpers they create count against the same limit of 50.`
+      : `${lim.tabs || count} tab${(lim.tabs || count) === 1 ? '' : 's'} at a time, up to ${lim.stepsPerAgent || 15} actions each, using your logged-in sessions. New sites and sensitive actions still ask you.`));
+    const list = apEl('div', 'agent-permission-list');
+    (req.agents || []).slice(0, 12).forEach((a) => {
+      const det = document.createElement('details');
+      det.className = 'action-perm-agent-item';
+      const sum = document.createElement('summary');
+      sum.textContent = `${a.name}${a.startOrigin ? ' - starts at ' + a.startOrigin : ''}`;
+      det.appendChild(sum);
+      if (a.startUrl) det.appendChild(apEl('div', 'action-perm-value mono', `Start URL: ${a.startUrl}`));
+      if (a.role) det.appendChild(apEl('div', 'action-perm-value', `Role: ${a.role}`));
+      det.appendChild(apEl('div', 'action-perm-label', 'Task'));
+      det.appendChild(apEl('pre', 'action-perm-goal', a.task || ''));
+      list.appendChild(det);
+    });
+    if (count > 12) list.appendChild(apEl('div', 'action-perm-label', `and ${count - 12} more...`));
+    card.appendChild(list);
+    const actions = apEl('div', 'agent-permission-actions');
+    const mk = (act, label, cls, title) => {
+      const b = apEl('button', `agent-perm-btn ${cls || ''}`.trim(), label);
+      b.type = 'button';
+      b.setAttribute('data-act', act);
+      if (title) b.title = title;
+      return b;
+    };
+    actions.append(
+      mk('allow', 'Allow', 'allow'),
+      mk('task', 'Allow for this task only', '', 'Later agent requests in this same task are not asked again'),
+      mk('deny', 'Deny', '')
+    );
+    card.appendChild(actions);
     card.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = btn.getAttribute('data-act');
         const allow = act !== 'deny';
-        sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow });
-        if (act === 'always') {
-          const input = document.getElementById('settingAgentConfirm');
-          if (input) input.checked = false;
-          chrome.storage.local.get(['antigravity_settings'], (res) => {
-            const prev = res.antigravity_settings || {};
-            prev.agentConfirm = false;
-            chrome.storage.local.set({ antigravity_settings: prev });
-          });
-        }
+        sendPortMessage({ type: 'agent_permission_response', requestId: req.requestId, allow, forTask: act === 'task' });
         card.className = 'agent-permission-card resolved';
-        card.innerHTML = `<div class="agent-permission-title">${allow ? 'Agents approved' : 'Agents denied'}</div>`;
+        card.textContent = allow ? 'Agents approved' : 'Agents denied';
       });
     });
     messagesContainer.appendChild(card);
     scrollToBottom();
   }
+  // --- end ---
+
+  // --- Autono security: action approval card (built only from extension-computed facts, textContent everywhere) ---
+  const actionPermissionCards = new Map();
+
+  function resolveActionPermissionCard(requestId, label) {
+    const card = actionPermissionCards.get(requestId);
+    if (!card) return;
+    actionPermissionCards.delete(requestId);
+    card.className = 'agent-permission-card resolved';
+    card.textContent = label;
+  }
+
+  function showActionPermissionCard(req) {
+    welcomeHero.classList.add('hidden');
+    messagesContainer.classList.remove('hidden');
+    const d = req.details || {};
+    const titles = {
+      navigate: 'Open this address?',
+      page: 'The task reached a new or sensitive site. Continue here?',
+      click: 'Click this element?',
+      type: 'Type this text?',
+      incognito: 'Work in an incognito tab?',
+    };
+    const card = apEl('div', 'agent-permission-card action-permission-card');
+    card.appendChild(apEl('div', 'agent-permission-title', titles[d.kind] || 'Allow this action?'));
+    if (d.agent) card.appendChild(apEl('div', 'action-perm-label', `Agent: ${d.agent}`));
+    if (Array.isArray(d.reasons) && d.reasons.length) {
+      const ul = apEl('ul', 'agent-permission-list');
+      d.reasons.forEach((r) => ul.appendChild(apEl('li', null, r)));
+      card.appendChild(ul);
+    }
+    const row = (label, value, mono) => {
+      if (!value) return;
+      const r = apEl('div', 'action-perm-row');
+      r.appendChild(apEl('span', 'action-perm-label', `${label}: `));
+      r.appendChild(apEl('span', mono ? 'action-perm-value mono' : 'action-perm-value', value));
+      card.appendChild(r);
+    };
+    row('Address', d.destinationUrl, true);
+    row('Site', d.destinationOrigin, true);
+    row('Current page', d.pageUrl, true);
+    if (d.element) {
+      row('Element', [d.element.tag, d.element.type].filter(Boolean).join(' / '));
+      row('Text', d.element.text);
+      row('Link', d.element.href, true);
+      row('Form sends to', d.element.formAction, true);
+      row('Field', d.element.field);
+    }
+    if (d.typed !== null && d.typed !== undefined) row('Will type', d.typed, true);
+    const actions = apEl('div', 'agent-permission-actions');
+    const mk = (decision, label, cls) => {
+      const b = apEl('button', `agent-perm-btn ${cls || ''}`.trim(), label);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        sendPortMessage({ type: 'action_permission_response', requestId: req.requestId, decision });
+        resolveActionPermissionCard(req.requestId, decision === 'deny' ? 'Denied' : decision === 'stop' ? 'Task stopped' : 'Allowed');
+      });
+      return b;
+    };
+    actions.appendChild(mk('once', 'Allow once', 'allow'));
+    if (d.allowSite) actions.appendChild(mk('site', `Allow ${d.siteLabel || 'this site'} for this task`, ''));
+    actions.appendChild(mk('deny', 'Deny', ''));
+    actions.appendChild(mk('stop', 'Stop task', 'subtle'));
+    card.appendChild(actions);
+    actionPermissionCards.set(req.requestId, card);
+    messagesContainer.appendChild(card);
+    scrollToBottom();
+  }
+  // --- end ---
 
   function renderAgentRunHtml(data) {
     const agents = Array.isArray(data.agents) ? data.agents : [];
@@ -9551,6 +10192,10 @@ You are a world-class principal software engineer.
       html = escapeHtml(processed).replace(/\n/g, '<br>');
     }
 
+    // Allowlist sanitiser (tags, attributes, link and image schemes; links get target/rel). Everything the
+    // extension adds itself (math, sub-agent cards, table header, reasoning, approval mounts) comes AFTER this.
+    html = sanitizeHtml(html, { extensionBase: chrome.runtime.getURL('') });
+
     // 7. Restore Math Tokens in HTML safely without regex substitution collision
     for (const [id, val] of mathMap.entries()) {
       const pWrapped = `<p>${id}</p>`;
@@ -9565,9 +10210,6 @@ You are a world-class principal software engineer.
       const pWrapped = `<p>${id}</p>`;
       html = html.includes(pWrapped) ? html.replaceAll(pWrapped, () => val) : html.replaceAll(id, () => val);
     }
-
-    // Ensure links open safely in a new tab
-    html = html.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
 
     // Wrap tables in responsive scroll container with interactive actions header
     const tableHeaderHtml = '<div class="table-actions-header">' +
@@ -9620,28 +10262,7 @@ You are a world-class principal software engineer.
 
   function sanitizeTableHtml(rawHtml) {
     if (!rawHtml || typeof rawHtml !== 'string') return '';
-    const temp = document.createElement('div');
-    temp.innerHTML = rawHtml;
-
-    // Disallow dangerous elements completely
-    const forbiddenTags = ['script', 'iframe', 'object', 'embed', 'link', 'style', 'form', 'input', 'button', 'svg', 'math'];
-    forbiddenTags.forEach(tag => {
-      temp.querySelectorAll(tag).forEach(el => el.remove());
-    });
-
-    // Remove all event handler attributes and unsafe hrefs/srcs
-    temp.querySelectorAll('*').forEach(el => {
-      const attrs = Array.from(el.attributes);
-      for (const attr of attrs) {
-        const name = attr.name.toLowerCase();
-        const val = attr.value.trim().toLowerCase();
-        if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('data:text/html')) {
-          el.removeAttribute(attr.name);
-        }
-      }
-    });
-
-    return temp.innerHTML;
+    return sanitizeHtml(rawHtml, { extensionBase: chrome.runtime.getURL('') });
   }
 
   function openTableInFullTab(tableHtml) {
@@ -9650,7 +10271,7 @@ You are a world-class principal software engineer.
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
   <title>Autono — Table View</title>
   <style>
     body {
@@ -9710,34 +10331,59 @@ You are a world-class principal software engineer.
     const blob = new Blob([pageHtml], { type: 'text/html' });
     const blobUrl = URL.createObjectURL(blob);
     chrome.tabs.create({ url: blobUrl });
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  }
+
+  // Autono: the right-click 'Ask Autono' action (the background sends it over the panel port)
+  function handleContextMenuAsk(msg) {
+    if (promptInput) {
+      promptInput.focus();
+      if (msg.selectionText) {
+        const previewName = msg.selectionText.length > 25 ? msg.selectionText.slice(0, 22) + '...' : msg.selectionText;
+        addAttachedItem({
+          type: 'fragment',
+          name: `Selección: "${previewName}"`,
+          content: `Texto seleccionado de ${msg.pageTitle || msg.pageUrl || 'la página'}:\nURL: ${msg.pageUrl || ''}\n\n"${msg.selectionText}"`,
+          url: msg.pageUrl,
+          title: msg.pageTitle,
+        });
+        promptInput.value = '';
+        promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
+        handleInputStateChange();
+        showToast('Texto seleccionado adjuntado como contexto');
+      } else if (msg.pageTitle) {
+        promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
+      }
+    }
   }
 
   // ─── Direct Runtime Message Listener for Panel Close & Context Menu ────────
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    // Only the extension's own pages / worker may drive the panel (never a content script on a web page)
+    if (!sender || sender.id !== chrome.runtime.id || (sender.url && !sender.url.startsWith(chrome.runtime.getURL('')))) return;
     if (msg?.type === 'close_side_panel') {
       window.close();
     } else if (msg?.type === 'CONTEXT_MENU_ASK_ANTIGRAVITY') {
-      if (promptInput) {
-        promptInput.focus();
-        if (msg.selectionText) {
-          const previewName = msg.selectionText.length > 25 ? msg.selectionText.slice(0, 22) + '...' : msg.selectionText;
-          addAttachedItem({
-            type: 'fragment',
-            name: `Selección: "${previewName}"`,
-            content: `Texto seleccionado de ${msg.pageTitle || msg.pageUrl || 'la página'}:\nURL: ${msg.pageUrl || ''}\n\n"${msg.selectionText}"`,
-            url: msg.pageUrl,
-            title: msg.pageTitle,
-          });
-          promptInput.value = '';
-          promptInput.placeholder = 'Haz una pregunta sobre el texto seleccionado...';
-          handleInputStateChange();
-          showToast('Texto seleccionado adjuntado como contexto');
-        } else if (msg.pageTitle) {
-          promptInput.placeholder = `Preguntar a Antigravity sobre "${msg.pageTitle.slice(0, 35)}"...`;
-        }
-      }
+      handleContextMenuAsk(msg);
     }
   });
+
+  // ─── Links (XP-10): every real link opens through chrome.tabs.create and only if it is http(s) ───
+  function handleLinkActivation(e) {
+    const link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!link || link.hasAttribute('download')) return; // file downloads (blob:) are handled where they are made
+    const raw = link.getAttribute('href') || '';
+    if (raw === '' || raw.startsWith('#')) return; // in-page anchors keep their own handlers
+    e.preventDefault();
+    e.stopPropagation();
+    let url = null;
+    try { url = new URL(link.href); } catch (_) { url = null; }
+    if (url && (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
+      chrome.tabs.create({ url: url.href }).catch(() => null);
+    }
+  }
+  document.addEventListener('click', handleLinkActivation, true);
+  document.addEventListener('auxclick', handleLinkActivation, true);
 
   // ─── CSP-Safe Delegated Click & Keyboard Handlers for Dynamic Elements ─────
   document.addEventListener('click', (e) => {

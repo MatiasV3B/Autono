@@ -1,32 +1,21 @@
 {
   "name": "autono",
   "version": "1.0.0",
+  "private": true,
   "description": "Autono - Autonomous AI Browser Agent & Navigation Copilot (Gemini 3.8, Claude)",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite",
     "build": "node scripts/build-dist.js",
-    "build:dist": "node scripts/build-dist.js"
+    "build:dist": "node scripts/build-dist.js",
+    "check": "node scripts/check-csp.js && node scripts/verify-vendor.js",
+    "test": "npm run check && node scripts/build-dist.js --tmp && npm run test:unit",
+    "verify:vendor": "node scripts/verify-vendor.js",
+    "test:unit": "node ../tests/security.test.js && node ../tests/security-sprint2.test.js && node ../tests/background-gates.test.js && node tests/autono-security.test.cjs"
   },
-  "dependencies": {
-    "@base-ui/react": "^1.8.0",
-    "@phosphor-icons/react": "^2.1.10",
-    "@radix-ui/react-accordion": "^1.2.20",
-    "@radix-ui/react-dialog": "^1.1.6",
-    "@radix-ui/react-popover": "^1.1.6",
-    "@radix-ui/react-tooltip": "^1.1.8",
-    "@tiny-fish/sdk": "^0.7.0",
-    "ai": "^7.0.107",
-    "border-beam": "^1.3.0",
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.4.7",
-    "katex": "^0.18.7",
-    "lucide-react": "^1.16.0",
-    "marked": "^18.0.13",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.0.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "^19.0.10",

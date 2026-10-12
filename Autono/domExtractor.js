@@ -11,6 +11,49 @@
     return str.replace(/\s+/g, ' ').trim();
   }
 
+  // --- Autono security: rendered-text extraction ---
+  // Everything the model sees must be something a human looking at the page could see: nodes that are
+  // aria-hidden, zero-size, off-screen, opacity:0, font-size:0, transparent, visibility:hidden or
+  // display:none are dropped, and attacker-controlled attribute strings are capped.
+  const ATTR_CAP = 80;
+  const TITLE_URL_CAP = 300;
+  const capAttr = (s, n) => {
+    const v = cleanText(s);
+    return v.length > (n || ATTR_CAP) ? v.slice(0, n || ATTR_CAP) : v;
+  };
+  const SKIP_TEXT_PARENTS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'IFRAME', 'TEMPLATE', 'OBJECT', 'EMBED', 'CANVAS', 'HEAD', 'TITLE', 'META', 'LINK']);
+  const hiddenCache = new WeakMap();
+
+  // true when the element itself (not its ancestors) is not rendered visibly
+  function selfHidden(el) {
+    if (el.hidden || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return true;
+    let style;
+    try { style = window.getComputedStyle(el); } catch (e) { return true; }
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return true;
+    if (parseFloat(style.opacity) === 0) return true;
+    const fontPx = parseFloat(style.fontSize);
+    if (Number.isFinite(fontPx) && fontPx < 1) return true;
+    const color = style.color || '';
+    if (/^rgba\(.*,\s*0\)$/.test(color) || color === 'transparent') return true;
+    return false;
+  }
+
+  function elementHidden(el) {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+    if (hiddenCache.has(el)) return hiddenCache.get(el);
+    let hidden = selfHidden(el);
+    if (!hidden && el.parentElement && el.parentElement !== document.documentElement) {
+      hidden = elementHidden(el.parentElement);
+    }
+    if (!hidden && window.getComputedStyle(el).display !== 'contents') {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) hidden = true;
+      else if (rect.right + window.scrollX <= 0 || rect.bottom + window.scrollY <= 0) hidden = true; // parked off-screen
+    }
+    hiddenCache.set(el, hidden);
+    return hidden;
+  }
+
   function isVisible(el) {
     if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
     const style = window.getComputedStyle(el);
@@ -18,12 +61,45 @@
       return false;
     }
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    if (!(rect.width > 0 && rect.height > 0)) return false;
+    return !elementHidden(el);
   }
 
+  // Rendered text of the live document: honours CSS, unlike the innerText of a detached clone.
+  function renderedText(maxLen) {
+    const root = document.body || document.documentElement;
+    if (!root) return '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const chunks = [];
+    let total = 0;
+    let visited = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (++visited > 40000) break;
+      const raw = node.nodeValue;
+      if (!raw || !raw.trim()) continue;
+      const parent = node.parentElement;
+      if (!parent || SKIP_TEXT_PARENTS.has(parent.tagName.toUpperCase())) continue;
+      if (elementHidden(parent)) continue;
+      const piece = cleanText(raw);
+      if (!piece) continue;
+      chunks.push(piece);
+      total += piece.length + 1;
+      if (total > maxLen + 1000) break;
+    }
+    return chunks.join(' ');
+  }
+
+  // attacker-controlled attribute values end up in selectors: keep them short
+  function safeSelector(sel) {
+    const s = String(sel || '');
+    return s.length > 120 ? '' : s;
+  }
+  // --- end ---
+
   function extractScreenJSON(maxTextLength = 65536) {
-    const title = document.title || '';
-    const url = window.location.href;
+    const title = capAttr(document.title || '', TITLE_URL_CAP);
+    const url = capAttr(window.location.href, TITLE_URL_CAP);
 
     // 1. Meta information
     const meta = {};
@@ -31,7 +107,7 @@
       const name = tag.getAttribute('name') || tag.getAttribute('property');
       const content = tag.getAttribute('content');
       if (name && content && (name.includes('description') || name.includes('keyword') || name.includes('title') || name.includes('og:'))) {
-        meta[name] = cleanText(content);
+        meta[name] = capAttr(content, TITLE_URL_CAP);
       }
     });
 
@@ -39,7 +115,7 @@
     const headings = [];
     document.querySelectorAll('h1, h2, h3, h4').forEach(h => {
       if (isVisible(h)) {
-        const text = cleanText(h.innerText);
+        const text = capAttr(h.innerText, 200);
         if (text) {
           headings.push(`${h.tagName.toUpperCase()}: ${text}`);
         }
@@ -88,15 +164,15 @@
 
     document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a.btn, a.button').forEach(btn => {
       if (isVisible(btn)) {
-        const label = cleanText(btn.innerText || btn.value || btn.getAttribute('aria-label') || btn.title || '');
-        if (label && label.length > 0 && label.length < 90) {
+        const label = capAttr(btn.innerText || btn.value || btn.getAttribute('aria-label') || btn.title || '', ATTR_CAP);
+        if (label && label.length > 0) {
           const idx = elemIndex++;
           window.__antigravity_dom_map.set(idx, btn);
           btn.setAttribute('data-highlight-index', String(idx));
           buttons.push({
             index: idx,
             label,
-            selector: getElementSelector(btn),
+            selector: safeSelector(getElementSelector(btn)),
           });
         }
       }
@@ -114,7 +190,7 @@
         // Check for sensitive fields to prevent credential and PII leakage
         const isPassword = type === 'password';
         const autocomplete = (inp.getAttribute('autocomplete') || '').toLowerCase();
-        const isSensitivePattern = /(password|passwd|pwd|passcode|token|secret|pin|cvv|cvc|creditcard|cardnumber|ssn|auth)/i.test(`${name} ${placeholder} ${ariaLabel}`);
+        const isSensitivePattern = /(password|passwd|pwd|passcode|token|secret|pin|cvv|cvc|creditcard|cardnumber|ssn|auth|one-time-code|otp|verification|iban|account|routing|dob|security)/i.test(`${name} ${placeholder} ${ariaLabel} ${autocomplete}`); // Autono security: wider masking
         const isSensitive = isPassword || autocomplete.includes('password') || autocomplete.includes('cc-') || isSensitivePattern;
 
         let safeValue = '';
@@ -129,9 +205,9 @@
         inputs.push({
           index: idx,
           type: isSensitive ? 'password' : type,
-          label: label || 'Campo sin etiqueta',
-          selector: getElementSelector(inp),
-          placeholder: placeholder || undefined,
+          label: capAttr(label || 'Campo sin etiqueta'),
+          selector: safeSelector(getElementSelector(inp)),
+          placeholder: placeholder ? capAttr(placeholder) : undefined,
           value: safeValue || undefined,
           isSensitive: isSensitive || undefined,
         });
@@ -141,26 +217,22 @@
     const navLinks = [];
     document.querySelectorAll('nav a, header a, main a').forEach(a => {
       if (isVisible(a)) {
-        const txt = cleanText(a.innerText || a.getAttribute('aria-label') || '');
+        const txt = capAttr(a.innerText || a.getAttribute('aria-label') || '', ATTR_CAP);
         const href = a.getAttribute('href');
-        if (txt && txt.length > 2 && txt.length < 80 && href && !href.startsWith('javascript:')) {
+        if (txt && txt.length > 2 && href && !href.startsWith('javascript:')) {
           if (!navLinks.includes(txt)) navLinks.push(txt);
         }
       }
     });
 
-    // 4. Main readable content
-    // Remove scripts, styles, noscript, etc.
-    const clone = document.body ? document.body.cloneNode(true) : document.documentElement.cloneNode(true);
-    clone.querySelectorAll('script, style, noscript, svg, iframe').forEach(n => n.remove());
-
-    let rawText = cleanText(clone.innerText || clone.textContent || '');
+    // 4. Main readable content: rendered text of the live DOM only (see renderedText above)
+    let rawText = renderedText(maxTextLength);
     if (rawText.length > maxTextLength) {
       rawText = rawText.slice(0, maxTextLength) + '... [contenido continuo al límite de extracción]';
     }
 
     // 5. Selected text if any
-    const selection = window.getSelection ? cleanText(window.getSelection().toString()) : '';
+    const selection = window.getSelection ? capAttr(window.getSelection().toString(), 1000) : '';
 
     return {
       title,
