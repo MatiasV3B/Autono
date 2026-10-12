@@ -79,7 +79,7 @@ Do not edit by hand: after a reviewed upgrade run `node scripts/verify-vendor.js
 | `50d9c78e03da144a021001b7de679133355179bcb06fd11e9e309223056a03dd` | 24788 | `side-panel/vendor/katex.min.css` |
 | `cc567bec51ade0dcfb0aac1bd8561fa293928386f221ad82d758d7b3643dafd5` | 602874 | `side-panel/vendor/katex.mjs` |
 | `2e70fea3ee49f98ab67ee395e5af51cc6bee4fafed15910da9ccb7f650df8014` | 44963 | `side-panel/vendor/marked.esm.js` |
-| `272d1777c64b21e3a3393881657ede4231087bb7867486f36be70186dd2de69c` | 1102 | `vendor/whisper/LICENSE` |
+| `94c66916ab5d45d666cc913899740f37921049592fe47edbe1078611f8063bb0` | 1082 | `vendor/whisper/LICENSE` |
 | `0d37558743e3b1c97265b77ec0131caf8c803c93f24a36a74c670d163c19aeab` | 30808 | `vendor/whisper/index.es.js` |
 | `35f4464ed9bf19822a8feebdf8a621999c201a14c975be68a7738d01b1de12dd` | 1390033 | `vendor/whisper/libmain-D9-QM3iM.mjs` |
 | `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7` | 32152673 | `vendor/whisper/models/ggml-tiny-q5_1.bin` |
