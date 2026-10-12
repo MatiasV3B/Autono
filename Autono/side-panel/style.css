@@ -6692,3 +6692,7 @@ html[data-chat-spacing="compact"] #messagesContainer {
 .code-run-modal-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .code-run-modal { background: #18181b; border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 12px; padding: 14px; width: 100%; max-height: 90vh; overflow: auto; }
 .code-run-code { max-height: 50vh; }
+
+/* Autono security: acknowledgment line in the code-run dialog */
+.code-run-ack { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; cursor: pointer; }
+.code-run-modal .agent-perm-btn:disabled { opacity: 0.45; cursor: not-allowed; }

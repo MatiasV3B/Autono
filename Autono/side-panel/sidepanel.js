@@ -9091,7 +9091,7 @@ You are a world-class principal software engineer.
   }
 
   // --- Autono security: per-run confirmation that shows the full code ---
-  function confirmCodeRun(lang, code) {
+  function confirmCodeRun(lang, code, tainted = true) {
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
       overlay.className = 'code-run-modal-overlay';
@@ -9101,11 +9101,27 @@ You are a world-class principal software engineer.
       box.className = 'code-run-modal';
       box.appendChild(apEl('div', 'agent-permission-title', `Run this ${lang} code?`));
       box.appendChild(apEl('div', 'agent-permission-warning', 'This runs on your computer through the Bridge, with your user permissions. Read all of it first.'));
+      if (tainted) {
+        box.appendChild(apEl('div', 'agent-permission-warning', 'This answer was written while a web page or search results were in context, so this code may have been steered by that content. Only run it if you understand every line.'));
+      }
       box.appendChild(apEl('pre', 'action-perm-goal code-run-code', code));
       const actions = apEl('div', 'agent-permission-actions');
       const finish = (v) => { overlay.remove(); resolve(v); };
+      let ackBox = null;
+      if (tainted) {
+        const ackLabel = document.createElement('label');
+        ackLabel.className = 'code-run-ack';
+        ackBox = document.createElement('input');
+        ackBox.type = 'checkbox';
+        ackLabel.append(ackBox, document.createTextNode(' I read all of the code above and I trust it'));
+        box.appendChild(ackLabel);
+      }
       const run = apEl('button', 'agent-perm-btn allow', 'Run on my computer');
       run.type = 'button';
+      if (ackBox) {
+        run.disabled = true;
+        ackBox.addEventListener('change', () => { run.disabled = !ackBox.checked; });
+      }
       run.addEventListener('click', () => finish(true));
       const cancel = apEl('button', 'agent-perm-btn', 'Cancel');
       cancel.type = 'button';
@@ -9169,13 +9185,13 @@ You are a world-class principal software engineer.
     // Python / Bash / Shell / JavaScript via AntigravityBridge (explicitly enabled and confirmed per run)
     if (!consoleEl) return;
     // --- Autono security: code execution gate ---
-    if (!allowCodeExecutionEnabled || artifact.tainted !== false) {
+    if (!allowCodeExecutionEnabled) {
       consoleEl.classList.remove('hidden');
       consoleEl.classList.add('error');
-      consoleEl.textContent = 'Running code is turned off, or this answer used web or page content. Copy the code and review it before running it yourself.';
+      consoleEl.textContent = 'Running code is turned off in Settings. Copy the code and review it before running it yourself.';
       return;
     }
-    const confirmedRun = await confirmCodeRun(lang, content);
+    const confirmedRun = await confirmCodeRun(lang, content, artifact.tainted !== false);
     if (!confirmedRun) return;
     // --- end ---
     consoleEl.classList.remove('hidden');
@@ -9219,8 +9235,8 @@ You are a world-class principal software engineer.
 
     const artifacts = extractFileArtifacts(rawText);
     if (!artifacts || artifacts.length === 0) return;
-    // --- Autono security: turns that carried page or web-search content never get a Run button. The open page is part
-    // of almost every turn, so this is fail-closed (tainted) until the background reports otherwise. ---
+    // --- Autono security: the open page is part of almost every turn, so every artifact is treated as possibly steered
+    // by web content: running it needs the setting, the full-code dialog AND an explicit "I read it" acknowledgment. ---
     artifacts.forEach((a) => { a.tainted = true; });
     // --- end ---
 
@@ -9260,7 +9276,7 @@ You are a world-class principal software engineer.
           </button>
           ` : ''}
           ${allowCodeExecutionEnabled && ['py', 'python', 'js', 'javascript', 'sh', 'bash'].includes(art.lang) ? `
-          <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}" ${art.tainted !== false ? 'disabled' : ''}>
+          <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <span>Ejecutar</span>
           </button>

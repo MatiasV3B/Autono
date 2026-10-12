@@ -36,7 +36,7 @@ Note: local addresses always ask for approval, so also test once against a norma
 - [ ] Clicking "Pay now" / "Enviar" asks even in Full mode; typing into a password field asks (allow once only); a denied type returns BLOCKED_SENSITIVE.
 - [ ] A model reply containing an `<approval_card>` with `cowork_request` and "No thanks" as option 0 shows only the fixed card with the full goal; reopen the chat: the card is inert.
 - [ ] Sub-agent card shows origin, URL and full task; there is no "don't ask again".
-- [ ] Code execution: hidden by default; with the setting on, the modal shows full code. (Run is expected to stay disabled until the clean-turn flag exists.)
+- [ ] Code execution: hidden by default; with the setting on, Run opens a modal with the full code, a warning that web content may have steered it, and a checkbox that must be ticked before "Run on my computer" enables.
 - [ ] Incognito tab: refused or asked once.
 
 ## 3. Prompt boundary, Bridge trust, kill switch (Sprint 3)
@@ -66,4 +66,4 @@ Note: local addresses always ask for approval, so also test once against a norma
 - [ ] `npm install --package-lock-only` then `npm ci` works.
 
 ## Known gaps (not bugs in this check)
-`tabs` / `unlimitedStorage` / `<all_urls>` still declared (static content scripts are gone); API keys still reach the panel via `init_state`; `options.js` has no URL validation of its own; Bridge-side controls (token, Origin/Host, sandbox, signed updates) are not in this repo.
+`unlimitedStorage` / `<all_urls>` still declared (`tabs` was dropped: host access already covers URLs and titles) (static content scripts are gone); API keys still reach the panel via `init_state`; `options.js` has no URL validation of its own; Bridge-side controls (token, Origin/Host, sandbox, signed updates) are not in this repo.
