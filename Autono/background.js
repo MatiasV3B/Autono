@@ -88,6 +88,7 @@ async function getSettings() {
     forwardKeysToBridge: s.forwardKeysToBridge === true, // A11
     autoAllowExternalActions: s.autoAllowExternalActions === true, // A10
     bridgeNoSystemRole: s.bridgeNoSystemRole === true, // A4 fallback when a route cannot take the system role
+    tinyFishApiKey: typeof s.tinyFishApiKey === 'string' ? s.tinyFishApiKey : '',
     // --- end ---
     tabGrouping: s.tabGrouping !== undefined ? s.tabGrouping : true,
     workingOverlay: s.workingOverlay !== undefined ? s.workingOverlay : true,
@@ -118,6 +119,12 @@ async function getPairingToken() {
     }).catch(() => null);
   }
   await pairingTokenLoaded;
+  if (!cachedPairingToken) {
+    try {
+      const d = await chrome.storage.local.get(PAIRING_TOKEN_KEY);
+      if (typeof d[PAIRING_TOKEN_KEY] === 'string') cachedPairingToken = d[PAIRING_TOKEN_KEY];
+    } catch (_) { /* keep the empty value */ }
+  }
   return cachedPairingToken;
 }
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1123,7 +1130,10 @@ async function resumeCoworkTask() {
   if (!runningTask) return;
   if (runningTask.status !== 'paused') return;
 
-  const urlToOpen = runningTask.savedTabUrl || runningTask.lastKnownUrl || 'https://google.com';
+  // --- Autono security: the saved URL goes through the same validation as every agent navigation ---
+  const savedUrlCheck = validateAgentUrl(runningTask.savedTabUrl || runningTask.lastKnownUrl || '');
+  const urlToOpen = savedUrlCheck.ok ? savedUrlCheck.url : 'https://www.google.com';
+  // --- end ---
 
   let tabToUse = null;
   if (runningTask.tabId) {
@@ -1646,6 +1656,7 @@ function mascotFromBroadcast(p) {
       break;
     }
     case 'agent_permission_request':
+    case 'action_permission_request':
       mascotSet('waiting');
       break;
     case 'task_complete':
@@ -4583,6 +4594,7 @@ async function executeScrollAction(tabId, direction) {
 
 // ─── Active Browser MCP Bridge Engine (Local Agent Control) ─────────────────
 let mcpBridgePollerActive = false;
+let mcpPollerGen = 0; // Autono security: a stop+start must not let the old loop clobber the new one
 let mcpBridgeAbortController = null;
 
 // --- Autono security: external-control poller (A10) ---
@@ -4590,7 +4602,7 @@ let mcpBridgeAbortController = null;
 // result, stops after 10 consecutive failures, started only from worker start or an explicit panel toggle.
 const MCP_MAX_FAILURES = 10;
 const MCP_TRUSTED_HOSTS_KEY = 'autono_mcp_trusted_hosts';
-const MCP_APPROVAL_ACTIONS = new Set(['navigate', 'browser_navigate', 'click', 'browser_click', 'type', 'browser_type', 'screenshot', 'browser_screenshot', 'browser_task']);
+const MCP_APPROVAL_ACTIONS = new Set(['get_active_tab', 'browser_get_active_tab', 'navigate', 'browser_navigate', 'click', 'browser_click', 'type', 'browser_type', 'screenshot', 'browser_screenshot', 'browser_task']);
 const MCP_ALLOWED_ACTIONS = new Set(['get_active_tab', 'browser_get_active_tab', ...MCP_APPROVAL_ACTIONS]);
 const pendingExternalApprovals = new Map();
 let mcpStatus = { state: 'off', reason: '', host: '', lastAction: null }; // shown in the panel
@@ -4633,13 +4645,16 @@ function requestExternalActionApproval(actionItem, summary) {
 async function startMcpBridgePoller() {
   if (mcpBridgePollerActive) return;
   mcpBridgePollerActive = true;
-  mcpBridgeAbortController = new AbortController();
+  const gen = ++mcpPollerGen;
+  const abortCtl = new AbortController();
+  mcpBridgeAbortController = abortCtl;
   let failures = 0;
 
   const settings0 = await getSettings();
   const parsed = AS.parseBridgeUrl(settings0.localMcpUrl || `${settings0.bridgeUrl}/mcp/sse`);
   const token = await getPairingToken();
   const refuse = (reason) => {
+    if (gen !== mcpPollerGen) return;
     mcpBridgePollerActive = false;
     mcpBridgeAbortController = null;
     setMcpStatus({ state: 'blocked', reason });
@@ -4650,7 +4665,7 @@ async function startMcpBridgePoller() {
   const mcpBridgeBaseUrl = parsed.origin;
   setMcpStatus({ state: 'running', reason: '', host: parsed.host });
 
-  while (mcpBridgePollerActive) {
+  while (mcpBridgePollerActive && gen === mcpPollerGen) {
     try {
       const settings = await getSettings();
       if (!settings.localMcpBridgeEnabled) break;
@@ -4658,15 +4673,17 @@ async function startMcpBridgePoller() {
       const resp = await fetch(`${mcpBridgeBaseUrl}/api/mcp/pending_actions?timeout=15`, {
         headers: { 'X-Autono-Token': await getPairingToken() },
         redirect: 'error',
-        signal: mcpBridgeAbortController?.signal,
+        signal: abortCtl.signal,
       }).catch((e) => (e && e.name === 'AbortError' ? 'aborted' : null));
 
       if (resp === 'aborted') break;
       if (!resp || !resp.ok) {
         failures += 1;
         if (failures >= MCP_MAX_FAILURES) {
-          mcpBridgePollerActive = false;
-          setMcpStatus({ state: 'stopped', reason: resp && (resp.status === 401 || resp.status === 403) ? 'unauthorized' : 'too_many_failures' });
+          if (gen === mcpPollerGen) {
+            mcpBridgePollerActive = false;
+            setMcpStatus({ state: 'stopped', reason: resp && (resp.status === 401 || resp.status === 403) ? 'unauthorized' : 'too_many_failures' });
+          }
           return;
         }
         await new Promise((r) => setTimeout(r, Math.min(30000, 2000 * failures)));
@@ -4683,20 +4700,24 @@ async function startMcpBridgePoller() {
       if (err.name === 'AbortError') break;
       failures += 1;
       if (failures >= MCP_MAX_FAILURES) {
-        mcpBridgePollerActive = false;
-        setMcpStatus({ state: 'stopped', reason: 'too_many_failures' });
+        if (gen === mcpPollerGen) {
+          mcpBridgePollerActive = false;
+          setMcpStatus({ state: 'stopped', reason: 'too_many_failures' });
+        }
         return;
       }
       await new Promise((r) => setTimeout(r, 4000));
     }
   }
 
+  if (gen !== mcpPollerGen) return; // superseded by a newer poller
   mcpBridgePollerActive = false;
   if (mcpStatus.state === 'running') setMcpStatus({ state: 'off', reason: '' });
 }
 
 function stopMcpBridgePoller() {
   mcpBridgePollerActive = false;
+  mcpPollerGen++;
   if (mcpBridgeAbortController) {
     try {
       mcpBridgeAbortController.abort();
@@ -5409,7 +5430,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
     if (msgType === 'cancel_task' || msgType === 'AGENT_WORK_PAUSED') {
-      const ownTask = runningTask && runningTask.tabId === sender.tab.id;
+      const ownTask = runningTask && (runningTask.tabId === sender.tab.id || autonoWorkTabs.has(sender.tab.id));
       if (!ownTask || (msgType === 'AGENT_WORK_PAUSED' && message.paused !== true)) {
         sendResponse?.({ success: false, paused: false, error: 'Not allowed' });
         return false;

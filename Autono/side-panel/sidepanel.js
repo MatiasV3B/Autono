@@ -1045,13 +1045,11 @@ marked.use({
         break;
 
       case 'agent_permission_request':
-        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showAgentPermissionCard(msg);
         break;
 
       // --- Autono security: action approval cards ---
       case 'action_permission_request':
-        if (msg.sessionId && msg.sessionId !== currentSessionId) break;
         showActionPermissionCard(msg);
         break;
 
@@ -6975,6 +6973,8 @@ marked.use({
     };
 
     tinyFishApiKey = newSettings.tinyFishApiKey;
+    webSearchEnabled = newSettings.webSearchEnabled === true; // Autono security: applies without reconnecting
+    allowCodeExecutionEnabled = newSettings.allowCodeExecution === true;
     currentGridOpacity = parseFloat(newSettings.gridOpacity);
     currentSquareSize = newSettings.squareSize;
     currentTrailDecay = parseFloat(newSettings.trailDuration);

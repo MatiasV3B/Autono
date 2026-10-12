@@ -80,8 +80,14 @@
     bridgeStatusNotice.textContent = `Probando ${url}...`;
     bridgeStatusNotice.className = 'status-notice';
 
+    // Autono security: the Bridge expects the pairing token once one exists
+    let authHeaders = {};
     try {
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+      const t = (await chrome.storage.local.get('autono_pairing_token')).autono_pairing_token;
+      authHeaders = { Authorization: 'Bearer ' + (t || 'sk-antigravity') };
+    } catch (_) { /* no token */ }
+    try {
+      const res = await fetch(`${url}/health`, { headers: authHeaders, signal: AbortSignal.timeout(3000), redirect: 'error' });
       if (res.ok) {
         const json = await res.json();
         bridgeStatusNotice.textContent = `🟢 Antigravity Bridge Activo (${json.service || 'Conectado'})`;
@@ -91,7 +97,7 @@
     } catch {
       // try fallback
       try {
-        const res2 = await fetch(`${url}/v1/models`, { signal: AbortSignal.timeout(3000) });
+        const res2 = await fetch(`${url}/v1/models`, { headers: authHeaders, signal: AbortSignal.timeout(3000), redirect: 'error' });
         if (res2.ok) {
           bridgeStatusNotice.textContent = `🟢 Antigravity Bridge Activo (OpenAI Gateway)`;
           bridgeStatusNotice.className = 'status-notice online';

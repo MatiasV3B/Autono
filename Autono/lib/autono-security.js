@@ -173,7 +173,7 @@
   const RESULT_PREFIXES = [
     ['not_found', /^(Element not found|Text field not found)\b/],
     ['failed', /^(Click failed|Typing failed|Scroll failed|Navigation failed)\b/],
-    ['blocked', /^(BLOCKED|Action blocked|Action denied|DENIED|Blocked)\b/],
+    ['blocked', /^(BLOCKED|USER_DENIED|Action blocked|Action denied|DENIED|Blocked|Navigation blocked|Navigation rejected)/],
     ['omitted', /^Action omitted\b/],
     ['cancelled', /^(Typing cancelled|Action cancelled|Cancelled)\b/],
   ];
