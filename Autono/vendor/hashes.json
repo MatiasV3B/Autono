@@ -380,9 +380,9 @@
       "source": "marked@18.0.13 (npm, lib/marked.esm.js)"
     },
     "vendor/whisper/LICENSE": {
-      "sha256": "272d1777c64b21e3a3393881657ede4231087bb7867486f36be70186dd2de69c",
-      "bytes": 1102,
-      "normalized": false,
+      "sha256": "94c66916ab5d45d666cc913899740f37921049592fe47edbe1078611f8063bb0",
+      "bytes": 1082,
+      "normalized": true,
       "source": "whisper.wasm MIT license"
     },
     "vendor/whisper/index.es.js": {
