@@ -2,7 +2,7 @@
 //   node scripts/verify-vendor.js           -> verify (exit 1 on any mismatch / missing / unlisted file)
 //   node scripts/verify-vendor.js --write   -> regenerate vendor/hashes.json from the CURRENT files
 //                                              (only do this deliberately, after reviewing an upgrade)
-// Text files (.js .mjs .css .md) are hashed with line endings normalised (CRLF -> LF) so the
+// Text files (.js .mjs .css .md and LICENSE) are hashed with line endings normalised (CRLF -> LF) so the
 // result does not depend on git autocrlf; binary files are hashed as-is.
 import fs from 'fs';
 import path from 'path';
@@ -22,7 +22,7 @@ const SOURCES = [
   { prefix: 'vendor/whisper/LICENSE', source: 'whisper.wasm MIT license' },
   { prefix: 'vendor/whisper/NOTICE.md', source: 'Autono notice (first-party)' },
 ];
-const TEXT = /\.(m?js|css|md)$/i;
+const TEXT = /(\.(m?js|css|md)|(^|\/)LICENSE)$/i;
 
 function walk(dir, rel, out) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
