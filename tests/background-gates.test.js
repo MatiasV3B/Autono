@@ -158,6 +158,64 @@ function connect(port) { for (const h of listeners['chrome.runtime.onConnect'] |
   ok(JSON.stringify(store.antigravity_settings) === before, 'a tab sender cannot change settings');
   void tabResp;
 
+  // ---- permission mode and mouse pointer settings
+  delete store.antigravity_settings;
+  const defaults = await ctx.getSettings();
+  ok(defaults.permissionMode === 'ask', 'permission mode defaults to ask');
+  ok(defaults.showCursor === true && defaults.cursorSize === 22, 'mouse pointer defaults: shown, 22 px');
+
+  await onPanelMessage({ type: 'save_settings', settings: { permissionMode: 'auto', cursorSize: 9999, showCursor: false } });
+  await wait(100);
+  ok(store.antigravity_settings.permissionMode === 'auto', 'the side panel can save permissionMode');
+  ok(store.antigravity_settings.cursorSize === 64 && store.antigravity_settings.showCursor === false, 'cursorSize is clamped to 12..64 and showCursor is saved');
+  await onPanelMessage({ type: 'save_settings', settings: { permissionMode: 'yolo', cursorSize: 1 } });
+  await wait(100);
+  ok(store.antigravity_settings.permissionMode === 'ask', 'an unknown permission mode falls back to ask');
+  ok(store.antigravity_settings.cursorSize === 12, 'cursorSize cannot go below 12');
+  await onPanelMessage({ type: 'save_settings', settings: { permissionMode: 'none' } });
+  await wait(100);
+  const beforeTab = JSON.stringify(store.antigravity_settings);
+  send({ type: 'save_settings', settings: { permissionMode: 'ask' } }, webTab);
+  await wait(50);
+  ok(JSON.stringify(store.antigravity_settings) === beforeTab, 'a web page cannot change the permission mode');
+
+  // ---- the action guard under each permission mode
+  const asked = [];
+  ctx.requestActionApproval = (taskId, sessionId, details) => { asked.push(details); return Promise.resolve('deny'); };
+  const guardFor = (permissionMode) => ctx.createActionGuard({
+    taskId: 't1', sessionId: 's1', settings: { permissionMode, autonomyMode: 'supervised' }, signal: undefined, startUrls: ['https://example.com/'],
+  });
+  const secretField = { tag: 'input', type: 'password', name: 'password', id: 'pw', labelText: 'Password' };
+  const plainField = { tag: 'input', type: 'text', name: 'q', id: 'q', labelText: 'Search' };
+  const payButton = { tag: 'button', type: 'submit', text: 'Pay now', isSubmit: true, formAction: 'https://example.com/pay' };
+
+  asked.length = 0;
+  const askNav = await guardFor('ask').navigate('https://new-site.example.org/');
+  ok(askNav.ok === false && asked.length === 1, 'ask: a new site still shows the approval card');
+  asked.length = 0;
+  ok((await guardFor('ask').beforeType(plainField, 'hello', 'https://example.com/')) !== true && asked.length === 1, 'ask: supervised typing still asks');
+
+  for (const mode of ['auto', 'none']) {
+    asked.length = 0;
+    const g = guardFor(mode);
+    const nav = await g.navigate('https://new-site.example.org/');
+    ok(nav.ok === true && asked.length === 0, `${mode}: a new site is approved without a card`);
+    ok((await g.beforeType(plainField, 'hello', 'https://example.com/')) === true && asked.length === 0, `${mode}: typing in a normal field does not ask`);
+    ok((await g.beforeClick(payButton, 'https://example.com/')) === true && asked.length === 0, `${mode}: a form submit / payment-looking click does not ask`);
+    const secret = await g.beforeType(secretField, 'hunter2', 'https://example.com/');
+    ok(typeof secret === 'string' && secret.startsWith('BLOCKED_SENSITIVE') && asked.length === 0, `${mode}: a password field is refused, not typed`);
+  }
+
+  asked.length = 0;
+  const autoLocal = await guardFor('auto').navigate('http://192.168.1.1/admin');
+  ok(autoLocal.ok === false && /BLOCKED_BY_POLICY/.test(autoLocal.message) && asked.length === 0, 'auto: a local address is refused by policy, with no card');
+  asked.length = 0;
+  const noneLocal = await guardFor('none').navigate('http://192.168.1.1/admin');
+  ok(noneLocal.ok === true && asked.length === 0, 'none: a local address is allowed without a card');
+
+  ok((await ctx.requestAgentPermission('t1', 's1', [{ name: 'a', task: 'x' }], { permissionMode: 'auto' }, undefined)) === true, 'auto: sub-agents are approved without a card');
+  ok((await ctx.requestAgentPermission('t1', 's1', [{ name: 'a', task: 'x' }], { permissionMode: 'none' }, undefined)) === true, 'none: sub-agents are approved without a card');
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

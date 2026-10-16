@@ -215,7 +215,7 @@ Describe un objetivo y Autono:
 2. Inspecciona la página y ejecuta los pasos (clic, escribir, bajar, navegar).
 3. Te informa del progreso y del resultado final.
 
-Mientras trabaja, una capa azul brillante indica que la página está bajo el control de Autono. Puedes **Pausar**, **Reanudar** o **Intervenir** en cualquier momento, y puede pedirte aprobación (tarjetas de aprobación) antes de pasos importantes.
+Mientras trabaja, una capa azul brillante indica que la página está bajo el control de Autono. Puedes **Pausar**, **Reanudar** o **Intervenir** en cualquier momento, y puede pedirte aprobación (tarjetas de aprobación) antes de pasos importantes. Un pequeño **puntero de mouse** viaja hasta cada elemento antes de que Autono haga clic o escriba, para que puedas seguirlo (puedes mostrarlo u ocultarlo y cambiar su tamaño en **Settings → Agent Behavior**).
 
 ### Atajos útiles dentro de las páginas web
 - **✨ Botón de contexto:** selecciona texto en cualquier página y pulsa el botón flotante para preguntar sobre él.
@@ -372,6 +372,9 @@ No decimos que Autono sea "100 % seguro": ningún software lo es. Lo que hacemos
 - **Bridge local.** Escucha únicamente en `127.0.0.1` (no es accesible desde otros equipos) y corre en un entorno aislado de `uv`, así que no toca el Python de tu sistema.
 - **Auditoría de dependencias.** Ejecuta `cd Autono && npm audit` cuando quieras (hoy: **0 vulnerabilidades**). El aviso de `source-map-js` (denegación de servicio por desplazamientos de source maps indexados) se corrigió actualizando a `source-map-js@1.2.2`, y el resto de avisos venía de la herramienta de compilación Tailwind CSS 3, que se migró a **Tailwind CSS 4**. Eran `devDependencies` usadas solo para los estilos; `node scripts/build-dist.js` nunca empaqueta `node_modules`, así que nunca se cargaron dentro de la extensión en Chrome.
 - **Tú mandas.** Cowork muestra su plan, puede pedirte aprobación en pasos importantes y puedes pausarlo o detenerlo en cualquier momento.
+- **Modos de permisos (Settings → Permissions).** *Ask manually* (preguntar) es el modo por defecto. *Auto approve* nunca pregunta, pero sigue negándose a abrir direcciones locales o internas. *Without permissions* nunca pregunta y no bloquea las direcciones locales. En ambos, Autono nunca escribe en campos de contraseña, tarjeta o código de un solo uso. Para activar cualquiera de los dos tienes que escribir una palabra de confirmación.
+  > **Úsalos bajo tu propio riesgo.** Una página web, un archivo o un mensaje que el agente lee puede traer instrucciones escritas para manipularlo (inyección de prompts), y con las preguntas apagadas nadie lo frena. Puede meter cosas en tu computador o actuar en tus cuentas. Los autores de Autono no se hacen responsables de lo que pase. Lo que realmente te protege son los límites de abajo, no este aviso.
+- **Límites que ningún modo levanta.** Viven en el Model Bridge, así que ni la extensión ni una página web pueden apagarlos: su CLI de Antigravity siempre corre en su sandbox, nunca apaga ni hiberna el computador, y no ejecuta código a menos que lo actives tú en su archivo de configuración (`code_execution` en `~/.antigravity_bridge/config.json`). Mira el README del Bridge para el detalle.
 - **¿Encontraste una vulnerabilidad?** Sigue [SECURITY.md](SECURITY.md) y repórtala de forma privada.
 
 ---

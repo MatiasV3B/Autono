@@ -141,6 +141,8 @@ marked.use({
   // Active Approval Cards Registry
   const activeApprovalCards = new Map();
   let allowCodeExecutionEnabled = false; // Autono security: mirrors the allowCodeExecution setting (default off)
+  let permissionMode = 'ask'; // "ask" (default) | "auto" | "none": see the Permissions card in Settings
+  const PERMISSION_CONFIRM_WORD = 'ACCEPT'; // typed to turn on a mode that stops asking
 
   // ─── State ──────────────────────────────────────────────────────────────────
   let port = null;
@@ -6308,6 +6310,8 @@ marked.use({
 
     const autonomyInput = settingEl('settingAutonomyMode');
     if (autonomyInput && s.autonomyMode) autonomyInput.value = s.autonomyMode;
+    setPermissionModeUi(s.permissionMode);
+    applyCursorSettingsToUi(s);
     // --- Autono security: code execution is off unless the user turned it on ---
     allowCodeExecutionEnabled = s.allowCodeExecution === true;
     refreshSiteAccessUi();
@@ -6860,6 +6864,7 @@ marked.use({
     if (nameInp && !nameInp.value && savedLocalName) nameInp.value = savedLocalName;
     if (nickInp && !nickInp.value && savedLocalNick) nickInp.value = savedLocalNick;
     settingsModal.classList.remove('hidden');
+    refreshBridgePermissionStatus();
     renderSkillChips();
     renderMcpServersList();
     renderExternalProvidersList();
@@ -6957,6 +6962,9 @@ marked.use({
       defaultThinking: settingEl('settingDefaultThinking')?.value || 'medium',
       systemPrompt: enrichedSysPrompt,
       autonomyMode: settingEl('settingAutonomyMode')?.value || 'supervised',
+      permissionMode: ['ask', 'auto', 'none'].includes(permissionMode) ? permissionMode : 'ask',
+      showCursor: settingEl('settingShowCursor')?.checked ?? true,
+      cursorSize: Math.min(64, Math.max(12, parseInt(settingEl('settingCursorSize')?.value || '22', 10) || 22)),
       allowCodeExecution: settingEl('settingAllowCodeExecution')?.checked === true, // Autono security
       visionScreenshots: settingEl('settingVisionScreenshots')?.checked ?? true,
       actionDelay: parseInt(settingEl('settingActionDelay')?.value || '350', 10),
@@ -7035,6 +7043,7 @@ marked.use({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(configBody),
     }).catch(() => null);
+    syncPermissionModeToBridge(newSettings.permissionMode, bridgeUrl);
     applyKeepAwake(newSettings.shadowPreventSleep);
     selectModel(newSettings.selectedModel);
     renderModelPickerRows(modelSearchInput.value);
@@ -9155,6 +9164,154 @@ You are a world-class principal software engineer.
   wireSiteAccessUi();
   // --- end ---
 
+  // --- Permissions card: Ask manually / Auto approve / Without permissions, and the visible mouse pointer ---
+  function setPermissionModeUi(mode) {
+    permissionMode = ['ask', 'auto', 'none'].includes(mode) ? mode : 'ask';
+    const hidden = settingEl('settingPermissionMode');
+    if (hidden) hidden.value = permissionMode;
+    document.querySelectorAll('#permissionsCard .perm-option').forEach((btn) => {
+      const on = btn.dataset.mode === permissionMode;
+      btn.classList.toggle('selected', on);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    const warn = settingEl('permWarning');
+    if (warn) warn.classList.toggle('hidden', permissionMode === 'ask');
+    // the Supervision Level only matters while Autono is asking
+    const supervision = settingEl('settingAutonomyMode');
+    if (supervision) supervision.disabled = permissionMode !== 'ask';
+  }
+
+  // A mode that stops asking needs the word typed: a click by accident (or by a page) is not enough.
+  function confirmPermissionMode(mode) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'code-run-modal-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      const box = document.createElement('div');
+      box.className = 'code-run-modal perm-confirm-modal';
+      const name = mode === 'none' ? 'Without permissions' : 'Auto approve';
+      box.appendChild(apEl('div', 'agent-permission-title', `Turn on "${name}"?`));
+      box.appendChild(apEl('div', 'agent-permission-warning', 'Autono will stop asking before it navigates, clicks, types, opens new sites or starts agents.'));
+      box.appendChild(apEl('div', 'agent-permission-warning', 'A web page, a file or a message the agent reads can tell it what to do, and nobody will stop it. That can put things on your computer or act on your accounts. You use this at your own risk: the authors of Autono are not responsible for what happens.'));
+      box.appendChild(apEl('div', 'field-hint', mode === 'auto'
+        ? 'It will still never type into password, card or one-time-code fields, and it will not open local or internal addresses.'
+        : 'It will still never type into password, card or one-time-code fields.'));
+      box.appendChild(apEl('label', 'field-hint', `Type ${PERMISSION_CONFIRM_WORD} to continue:`));
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'perm-confirm-input';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      box.appendChild(input);
+      const actions = apEl('div', 'agent-permission-actions');
+      const finish = (v) => { overlay.remove(); resolve(v); };
+      const ok = apEl('button', 'agent-perm-btn danger', `Turn on "${name}"`);
+      ok.type = 'button';
+      ok.disabled = true;
+      const typedOk = () => input.value.trim().toUpperCase() === PERMISSION_CONFIRM_WORD;
+      input.addEventListener('input', () => { ok.disabled = !typedOk(); });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && typedOk()) finish(true);
+        if (e.key === 'Escape') finish(false);
+      });
+      ok.addEventListener('click', () => { if (typedOk()) finish(true); });
+      const cancel = apEl('button', 'agent-perm-btn', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => finish(false));
+      actions.append(ok, cancel);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      input.focus();
+    });
+  }
+
+  function applyCursorSettingsToUi(s) {
+    const show = settingEl('settingShowCursor');
+    const slider = settingEl('settingCursorSize');
+    if (show) show.checked = s.showCursor !== false;
+    if (slider) {
+      const n = Math.min(64, Math.max(12, parseInt(s.cursorSize, 10) || 22));
+      slider.value = String(n);
+      slider.disabled = !(show ? show.checked : true);
+    }
+    syncCursorSizeUi();
+  }
+
+  function syncCursorSizeUi() {
+    const slider = settingEl('settingCursorSize');
+    if (!slider) return;
+    const n = Math.min(64, Math.max(12, parseInt(slider.value, 10) || 22));
+    const label = settingEl('cursorSizeValue');
+    if (label) label.textContent = `${n} px`;
+    const svg = settingEl('cursorPreviewSvg');
+    if (svg) { svg.setAttribute('width', String(n)); svg.setAttribute('height', String(n)); }
+  }
+
+  // Sends the mode to the Bridge so its Antigravity CLI follows it. Only an extension page can do it.
+  async function syncPermissionModeToBridge(mode, bridgeUrl) {
+    const status = settingEl('permBridgeStatus');
+    try {
+      const res = await fetch(`${bridgeUrl}/api/permissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      if (res.status === 404) {
+        if (status) status.textContent = 'This Bridge is older than Autono expects and does not know permission modes yet. Update it so the mode also applies to its Antigravity CLI.';
+        return;
+      }
+      if (!res.ok) {
+        if (status) status.textContent = 'The Bridge refused to change its permission mode.';
+        return;
+      }
+      showBridgePermissionState(await res.json());
+    } catch (_) {
+      if (status) status.textContent = 'Bridge not reachable. The mode is saved here and goes to the Bridge the next time you save.';
+    }
+  }
+
+  function showBridgePermissionState(data) {
+    const status = settingEl('permBridgeStatus');
+    if (!status || !data || typeof data.mode !== 'string') return;
+    const hl = data.hard_limits || {};
+    status.textContent = `Bridge: mode ${data.mode}. CLI sandbox ${hl.cli_sandbox ? 'on' : 'off'}, shutdown ${hl.shutdown ? 'allowed' : 'blocked'}, running code ${hl.code_execution === 'isolated' ? 'on (isolated)' : 'off'}.`;
+  }
+
+  async function refreshBridgePermissionStatus() {
+    const status = settingEl('permBridgeStatus');
+    if (!status) return;
+    const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+    try {
+      const res = await fetch(`${bridgeUrl}/api/permissions`);
+      if (res.status === 404) {
+        status.textContent = 'This Bridge is older than Autono expects and does not know permission modes yet. Update it so the mode also applies to its Antigravity CLI.';
+        return;
+      }
+      if (res.ok) showBridgePermissionState(await res.json());
+    } catch (_) {
+      status.textContent = 'Bridge not reachable.';
+    }
+  }
+
+  function wirePermissionsUi() {
+    document.querySelectorAll('#permissionsCard .perm-option').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const mode = btn.dataset.mode;
+        if (mode === permissionMode) return;
+        if (mode !== 'ask' && !(await confirmPermissionMode(mode))) return;
+        setPermissionModeUi(mode);
+      });
+    });
+    const slider = settingEl('settingCursorSize');
+    if (slider) slider.addEventListener('input', syncCursorSizeUi);
+    const show = settingEl('settingShowCursor');
+    if (show && slider) show.addEventListener('change', () => { slider.disabled = !show.checked; });
+  }
+  wirePermissionsUi();
+  // --- end ---
+
   // --- Autono security: per-run confirmation that shows the full code ---
   function confirmCodeRun(lang, code, tainted = true) {
     return new Promise((resolve) => {
@@ -9275,6 +9432,12 @@ You are a world-class principal software engineer.
         return;
       }
       const data = await resp.json();
+      // The Bridge keeps code execution off unless it was turned on in its own config file (it cannot be done from here)
+      if (resp.status === 403 && data.detail && data.detail.error === 'code_execution_disabled') {
+        consoleEl.classList.add('error');
+        consoleEl.textContent = 'The Bridge has code execution turned off. To use Run, set "code_execution": "isolated" in ~/.antigravity_bridge/config.json on this computer and restart the Bridge. It runs Python and JavaScript only.';
+        return;
+      }
       if (resp.ok && data.status === 'ok') {
         const out = (data.stdout || '').trim();
         const err = (data.stderr || '').trim();
@@ -9286,7 +9449,8 @@ You are a world-class principal software engineer.
         }
       } else {
         consoleEl.classList.add('error');
-        consoleEl.textContent = `❌ Error: ${data.detail || data.stderr || 'Execution failed'}`;
+        const detail = data.detail && typeof data.detail === 'object' ? (data.detail.message || data.detail.error) : data.detail;
+        consoleEl.textContent = `❌ Error: ${detail || data.stderr || 'Execution failed'}`;
       }
     } catch (err) {
       consoleEl.classList.add('error');
@@ -9340,7 +9504,7 @@ You are a world-class principal software engineer.
             <span>Vista Previa</span>
           </button>
           ` : ''}
-          ${allowCodeExecutionEnabled && ['py', 'python', 'js', 'javascript', 'sh', 'bash'].includes(art.lang) ? `
+          ${allowCodeExecutionEnabled && ['py', 'python', 'js', 'javascript'].includes(art.lang) ? `
           <button type="button" class="file-artifact-btn btn-run" title="Ejecutar código de ${escapeHtml(art.filename)}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <span>Ejecutar</span>

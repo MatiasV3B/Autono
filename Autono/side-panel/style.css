@@ -6696,3 +6696,40 @@ html[data-chat-spacing="compact"] #messagesContainer {
 /* Autono security: acknowledgment line in the code-run dialog */
 .code-run-ack { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; cursor: pointer; }
 .code-run-modal .agent-perm-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ─── Permissions card (Settings) ────────────────────────────────────────── */
+.perm-options { display: flex; flex-direction: column; gap: 8px; }
+.perm-option { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.1); background: transparent; color: #e4e4e7; cursor: pointer; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.perm-option:hover { background: rgba(255, 255, 255, 0.04); }
+.perm-option:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.perm-option.selected { border-color: #3b82f6; background: rgba(59, 130, 246, 0.08); }
+.perm-option.perm-danger.selected { border-color: rgba(239, 68, 68, 0.65); background: rgba(239, 68, 68, 0.07); }
+.perm-radio { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px; border-radius: 50%; border: 1.5px solid #71717a; position: relative; }
+.perm-option.selected .perm-radio { border-color: #3b82f6; }
+.perm-option.perm-danger.selected .perm-radio { border-color: #ef4444; }
+.perm-option.selected .perm-radio::after { content: ''; position: absolute; inset: 2.5px; border-radius: 50%; background: #3b82f6; }
+.perm-option.perm-danger.selected .perm-radio::after { background: #ef4444; }
+.perm-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.perm-name { font-size: 12.5px; font-weight: 600; color: #f4f4f5; }
+.perm-badge { margin-left: 6px; padding: 1px 6px; border-radius: 5px; font-size: 10px; font-weight: 600; color: #a1a1aa; background: rgba(255, 255, 255, 0.08); }
+.perm-desc { font-size: 11.5px; line-height: 1.4; color: #a1a1aa; }
+.perm-warning { padding: 9px 11px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.07); color: #fca5a5; font-size: 11.5px; line-height: 1.45; }
+.perm-warning.hidden { display: none; }
+.perm-limits { padding: 9px 11px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.025); }
+.perm-limits-title { display: block; margin-bottom: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #71717a; }
+.perm-limits ul { margin: 0; padding-left: 16px; }
+.perm-limits li { font-size: 11.5px; line-height: 1.5; color: #a1a1aa; }
+#settingAutonomyMode:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Typed confirmation for Auto approve / Without permissions */
+.perm-confirm-input { width: 100%; box-sizing: border-box; margin: 10px 0 4px; padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.05); color: #f4f4f5; font-size: 12.5px; letter-spacing: 0.04em; }
+.perm-confirm-input:focus { outline: none; border-color: #3b82f6; }
+.perm-confirm-modal { border-color: rgba(239, 68, 68, 0.55); max-width: 380px; }
+.agent-perm-btn.danger { background: #dc2626; border-color: #dc2626; color: #fff; font-weight: 600; }
+.agent-perm-btn.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Mouse pointer size */
+.cursor-size-row { display: flex; align-items: center; gap: 14px; }
+.cursor-size-row input[type="range"] { flex: 1; min-width: 0; accent-color: #3b82f6; }
+.cursor-size-value { margin-left: 6px; font-size: 11px; font-weight: 500; color: #a1a1aa; }
+.cursor-preview { flex: 0 0 72px; height: 72px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); background: #101114; }

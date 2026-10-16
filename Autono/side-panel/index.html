@@ -728,6 +728,55 @@
               </div>
             </div>
 
+            <!-- Card: Permissions (how much the agent may do without asking) -->
+            <div class="settings-card" id="permissionsCard">
+              <div class="card-header">
+                <h4 class="card-title">Permissions</h4>
+                <p class="card-desc">How much the agent may do without asking you first</p>
+              </div>
+              <div class="card-content">
+                <input type="hidden" id="settingPermissionMode" value="ask">
+                <div class="perm-options" role="radiogroup" aria-label="Permission mode">
+                  <button type="button" class="perm-option selected" role="radio" aria-checked="true" data-mode="ask">
+                    <span class="perm-radio" aria-hidden="true"></span>
+                    <span class="perm-text">
+                      <span class="perm-name">Ask manually <span class="perm-badge">Default</span></span>
+                      <span class="perm-desc">Autono asks before it acts. How often depends on the Supervision Level below.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="perm-option" role="radio" aria-checked="false" data-mode="auto">
+                    <span class="perm-radio" aria-hidden="true"></span>
+                    <span class="perm-text">
+                      <span class="perm-name">Auto approve</span>
+                      <span class="perm-desc">Never asks. It still refuses to open local or internal addresses.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="perm-option perm-danger" role="radio" aria-checked="false" data-mode="none">
+                    <span class="perm-radio" aria-hidden="true"></span>
+                    <span class="perm-text">
+                      <span class="perm-name">Without permissions</span>
+                      <span class="perm-desc">Never asks and does not block local or internal addresses.</span>
+                    </span>
+                  </button>
+                </div>
+
+                <div class="perm-warning hidden" id="permWarning" role="note">
+                  <strong>Risk.</strong> A web page, a file or a message the agent reads can contain instructions written to steer it (prompt injection). With the questions turned off, nobody stops it. You use this mode at your own risk; the authors of Autono are not responsible for what happens on your computer or accounts.
+                </div>
+
+                <div class="perm-limits">
+                  <span class="perm-limits-title">Always on, in every mode</span>
+                  <ul>
+                    <li>Never types into password, card or one-time-code fields.</li>
+                    <li>The Bridge runs the Antigravity CLI inside its sandbox.</li>
+                    <li>The Bridge never shuts down or hibernates the computer.</li>
+                    <li>The Bridge does not run code unless you turn that on in its config file.</li>
+                  </ul>
+                </div>
+                <span class="field-hint" id="permBridgeStatus"></span>
+              </div>
+            </div>
+
             <!-- Card 2: Agent Behavior & Automation -->
             <div class="settings-card">
               <div class="card-header">
@@ -748,7 +797,28 @@
                     <option value="semi">Semi-Autonomous</option>
                     <option value="full">Full Autonomy (Direct execution)</option>
                   </select>
-                  <span class="field-hint">Supervised: asks before every navigation, click and typing. Semi-Autonomous and Full: ask only for sensitive actions (new sites, forms, payments and sends, passwords, sensitive sites). Sensitive actions always ask in every level.</span>
+                  <span class="field-hint">Used when Permissions is on Ask manually. Supervised: asks before every navigation, click and typing. Semi-Autonomous and Full: ask only for sensitive actions (new sites, forms, payments and sends, passwords, sensitive sites). Sensitive actions always ask at every level.</span>
+                </div>
+
+                <div class="setting-field-toggle">
+                  <div class="toggle-text">
+                    <span class="toggle-title">Show mouse pointer</span>
+                    <span class="toggle-desc">A small pointer travels to the element before the agent clicks or types, so you can follow what it does.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingShowCursor" checked>
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+
+                <div class="setting-field" id="cursorSizeField">
+                  <label for="settingCursorSize">Pointer size <span class="cursor-size-value" id="cursorSizeValue">22 px</span></label>
+                  <div class="cursor-size-row">
+                    <input type="range" id="settingCursorSize" min="12" max="64" step="1" value="22">
+                    <span class="cursor-preview" aria-hidden="true">
+                      <svg id="cursorPreviewSvg" viewBox="0 0 24 24" width="22" height="22"><path d="M3 2v17l4.5-4.2 3.1 6.6 3-1.4-3.1-6.5H17z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    </span>
+                  </div>
                 </div>
 
                 <div class="setting-field-toggle">

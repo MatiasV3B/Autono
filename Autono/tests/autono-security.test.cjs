@@ -162,6 +162,56 @@ test('clampMaxSteps', () => {
   assert.strictEqual(S.clampMaxSteps(NaN, 15), 15);
 });
 
+// ---- permission mode ----
+test('normalizePermissionMode: ask is the default for anything unknown', () => {
+  for (const v of [undefined, null, '', 'yolo', 'AUTO ', 5, {}, 'ASK']) {
+    const out = S.normalizePermissionMode(v);
+    assert.ok(S.PERMISSION_MODES.includes(out));
+  }
+  assert.strictEqual(S.normalizePermissionMode(undefined), 'ask');
+  assert.strictEqual(S.normalizePermissionMode('yolo'), 'ask');
+  assert.strictEqual(S.normalizePermissionMode(' Auto '), 'auto');
+  assert.strictEqual(S.normalizePermissionMode('NONE'), 'none');
+});
+
+test('permissionDecision: ask mode always shows the card', () => {
+  for (const codes of [[], ['new_site'], ['sensitive_field'], ['private_network'], undefined]) {
+    assert.strictEqual(S.permissionDecision('ask', codes), 'ask');
+    assert.strictEqual(S.permissionDecision('garbage', codes), 'ask');
+  }
+});
+
+test('permissionDecision: auto and none approve without asking', () => {
+  for (const mode of ['auto', 'none']) {
+    for (const codes of [[], undefined, ['new_site'], ['routine'], ['form_submit', 'sensitive_label'], ['sensitive_site']]) {
+      assert.strictEqual(S.permissionDecision(mode, codes), 'allow', `${mode} ${JSON.stringify(codes)}`);
+    }
+  }
+});
+
+test('permissionDecision: a secret field is refused in every mode that does not ask', () => {
+  for (const mode of ['auto', 'none']) {
+    assert.strictEqual(S.permissionDecision(mode, ['sensitive_field']), 'deny');
+    assert.strictEqual(S.permissionDecision(mode, ['new_site', 'sensitive_field', 'form_submit']), 'deny');
+  }
+});
+
+test('permissionDecision: local and internal addresses are refused in auto, allowed in none', () => {
+  assert.strictEqual(S.permissionDecision('auto', ['private_network']), 'deny');
+  assert.strictEqual(S.permissionDecision('auto', ['new_site', 'private_network']), 'deny');
+  assert.strictEqual(S.permissionDecision('none', ['private_network']), 'allow');
+});
+
+test('clampCursorSize', () => {
+  assert.strictEqual(S.clampCursorSize(undefined), 22);
+  assert.strictEqual(S.clampCursorSize('abc'), 22);
+  assert.strictEqual(S.clampCursorSize(0), 12);
+  assert.strictEqual(S.clampCursorSize(999), 64);
+  assert.strictEqual(S.clampCursorSize('30'), 30);
+  assert.strictEqual(S.clampCursorSize(30.6), 31);
+  assert.strictEqual(S.clampCursorSize(NaN, 18), 18);
+});
+
 test('generatePairingToken: 64 hex chars, unique', () => {
   const a = S.generatePairingToken(); const b = S.generatePairingToken();
   assert.ok(/^[0-9a-f]{64}$/.test(a));
