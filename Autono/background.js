@@ -4884,7 +4884,9 @@ async function handleMcpAction(actionItem, bridgeUrl) {
     })();
     setMcpStatus({ lastAction: { action, summary, at: Date.now() } });
     broadcastMessage({ type: 'external_action', action, summary, host: mcpStatus.host }); // persistent in-panel indicator
-    if (MCP_APPROVAL_ACTIONS.has(action) && !settingsExt.autoAllowExternalActions && AS.normalizePermissionMode(settingsExt.permissionMode) === 'ask') {
+    // Not tied to the permission mode: these clicks and typing do not go through the action guard, so the card is
+    // their only gate (secret fields, local addresses). Only the explicit "auto-allow external actions" switch skips it.
+    if (MCP_APPROVAL_ACTIONS.has(action) && !settingsExt.autoAllowExternalActions) {
       const allowed = await requestExternalActionApproval(actionItem, summary);
       if (!allowed) throw new Error('The user did not allow this external action');
     }
