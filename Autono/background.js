@@ -933,6 +933,27 @@ async function handleAutoTabGrouping(tabId, goalText = '') {
   }
 }
 
+// On task completion, the group title's first character becomes a ✅
+async function markTabGroupDone(tabId) {
+  try {
+    if (!chrome.tabGroups) return;
+    let groupId = currentAgentGroupId;
+    if (tabId) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (tab && tab.groupId > -1) groupId = tab.groupId;
+    }
+    if (!groupId || groupId === -1) return;
+    const group = await chrome.tabGroups.get(groupId).catch(() => null);
+    if (!group) return;
+    const chars = Array.from(group.title || '');
+    if (chars[0] === '✅') return;
+    chars[0] = '✅';
+    await chrome.tabGroups.update(groupId, { title: chars.join('') });
+  } catch (err) {
+    console.warn('Mark tab group done error:', err);
+  }
+}
+
 async function triggerWorkOverlay(tabId, show = true, title = 'Antigravity is working') {
   try {
     const settings = await getSettings();
@@ -4071,7 +4092,10 @@ ${summary ? `> ${summary}\n` : ''}
     fetchBridgeQuota(base, true).catch(() => null);
 
     // Shadow completion action (sleep / shutdown if configured); never after a cancel (A19)
-    if (!abortController.signal.aborted) handleShadowOnTaskComplete();
+    if (!abortController.signal.aborted) {
+      await markTabGroupDone(tabId);
+      handleShadowOnTaskComplete();
+    }
   } catch (err) {
     if (err.name === 'AbortError') {
       broadcastMessage({ type: 'task_aborted', taskId, sessionId });
