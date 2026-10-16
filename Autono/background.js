@@ -100,6 +100,11 @@ async function getSettings() {
     // --- Autono security: autonomy level and code-execution switch ---
     autonomyMode: ['supervised', 'semi', 'full'].includes(s.autonomyMode) ? s.autonomyMode : 'supervised',
     allowCodeExecution: s.allowCodeExecution === true,
+    // "ask" (default) | "auto" | "none": see AutonoSecurity.permissionDecision. Anything unknown is "ask".
+    permissionMode: AS.normalizePermissionMode(s.permissionMode),
+    // visible mouse cursor that shows where the agent clicks and types
+    showCursor: s.showCursor !== false,
+    cursorSize: AS.clampCursorSize(s.cursorSize),
     // --- end ---
   };
 }
@@ -797,19 +802,31 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // ─── Context Menu (Right-Click: Ask Autono Anywhere) ────────────────────────
+// onInstalled and onStartup can both fire for the same worker start. Two overlapping removeAll -> create runs made
+// the second create fail with "duplicate id", so the setup runs one at a time and reads chrome.runtime.lastError.
+let contextMenuSetup = null;
 function setupContextMenus() {
-  try {
-    if (!chrome.contextMenus) return;
-    chrome.contextMenus.removeAll(() => {
-      chrome.contextMenus.create({
-        id: 'antigravity_ask_page',
-        title: 'Ask Autono',
-        contexts: ['page', 'frame', 'link', 'image', 'selection']
+  if (contextMenuSetup) return contextMenuSetup;
+  contextMenuSetup = new Promise((resolve) => {
+    try {
+      if (!chrome.contextMenus) return resolve();
+      chrome.contextMenus.removeAll(() => {
+        void chrome.runtime.lastError;
+        chrome.contextMenus.create({
+          id: 'antigravity_ask_page',
+          title: 'Ask Autono',
+          contexts: ['page', 'frame', 'link', 'image', 'selection']
+        }, () => {
+          void chrome.runtime.lastError; // already there: nothing to do
+          resolve();
+        });
       });
-    });
-  } catch (err) {
-    console.warn('Context menu setup error:', err);
-  }
+    } catch (err) {
+      console.warn('Context menu setup error:', err);
+      resolve();
+    }
+  }).finally(() => { contextMenuSetup = null; });
+  return contextMenuSetup;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -1264,6 +1281,7 @@ const SETTINGS_SCHEMA = {
   defaultThinking: 'str', systemPrompt: 'longstr', autonomyMode: 'str', gridOpacity: 'str', trailDuration: 'str',
   borderBeamGlow: 'str', chatFontSize: 'str', chatSpacing: 'str', colorTheme: 'str', shadowOnComplete: 'str',
   userName: 'str', userNickname: 'str',
+  permissionMode: 'str', showCursor: 'bool', cursorSize: 'num',
   maxSteps: 'num', maxOutputTokens: 'num', actionDelay: 'num', squareSize: 'num', temperature: 'num',
   visionScreenshots: 'bool', completionSound: 'bool', shadowEnabled: 'bool', shadowPreventSleep: 'bool',
   shadowAutoWake: 'bool', tabGrouping: 'bool', workingOverlay: 'bool', multiAgent: 'bool', agentConfirm: 'bool',
@@ -1319,6 +1337,8 @@ async function saveSettings(incoming) {
   // The remote-control toggle changes only through the explicit 'mcp_bridge_set' port message
   if (prev.localMcpBridgeEnabled !== undefined) settings.localMcpBridgeEnabled = prev.localMcpBridgeEnabled; else delete settings.localMcpBridgeEnabled;
   if (settings.maxSteps !== undefined) settings.maxSteps = AS.clampMaxSteps(settings.maxSteps, 30);
+  if (settings.permissionMode !== undefined) settings.permissionMode = AS.normalizePermissionMode(settings.permissionMode);
+  if (settings.cursorSize !== undefined) settings.cursorSize = AS.clampCursorSize(settings.cursorSize);
   if (rejected.length) broadcastMessage({ type: 'settings_warning', items: rejected });
   // --- end ---
   await chrome.storage.local.set({ antigravity_settings: settings });
@@ -1378,8 +1398,10 @@ async function fetchBridgeQuota(baseUrl, force = false) {
 }
 
 // ─── AntigravityBridge Connection Watchdog ──────────────────────────────────
-// The Bridge reports an "api_level"; the extension needs at least this one (Claude fixes, sub-agents)
-const MIN_BRIDGE_API_LEVEL = 4;
+// The Bridge reports an "api_level"; the extension needs at least this one (Claude fixes, sub-agents).
+// 9 = permission mode and hard limits: an older Bridge always runs its Antigravity CLI with every permission
+// auto-approved, so "Ask manually" would not reach it.
+const MIN_BRIDGE_API_LEVEL = 9;
 
 async function checkBridgeHealth() {
   const settings = await getSettings();
@@ -1965,6 +1987,8 @@ function requestActionApproval(taskId, sessionId, details, signal) {
 }
 
 const GUARD_DENIED_TEXT = 'USER_DENIED: the user did not approve this action. Do not retry it. Choose a different approach or finish and explain.';
+// In "auto" / "none" nothing is asked, so a refusal is a rule of the extension, not an answer from the user.
+const GUARD_POLICY_TEXT = 'BLOCKED_BY_POLICY: this action is never done without the user (a secret field, or a local or internal address). Do not retry it. Choose a different approach or tell the user to do it themselves.';
 
 // One guard per task (Cowork) or per sub-agent. mode: 'supervised' | 'semi' | 'full'.
 function createActionGuard({ taskId, sessionId, settings, signal, startUrls = [], agentName = '', routinePrompts = true }) {
@@ -1977,9 +2001,20 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
     const v = validateAgentUrl(String(raw || ''));
     if (v.ok) seenDomains.add(v.registrable);
   }
-  const askRoutine = routinePrompts && mode === 'supervised';
+  const permMode = AS.normalizePermissionMode(settings?.permissionMode);
+  const askRoutine = routinePrompts && mode === 'supervised' && permMode === 'ask';
+  const deniedText = permMode === 'ask' ? GUARD_DENIED_TEXT : GUARD_POLICY_TEXT;
 
   const ask = async (details) => {
+    if (permMode !== 'ask') {
+      // "auto" / "none": the card is not shown. Secret fields (and, in "auto", local addresses) are refused.
+      const verdict = AS.permissionDecision(permMode, details.reasonCodes);
+      if (verdict === 'deny') return 'deny';
+      if (verdict === 'allow') {
+        if (details.siteDomain && details.allowSite !== false) grantedSites.add(details.siteDomain);
+        return 'once';
+      }
+    }
     const decision = await requestActionApproval(taskId, sessionId, { agent: agentName, ...details }, signal);
     if (decision === 'site' && details.siteDomain && details.allowSite !== false) grantedSites.add(details.siteDomain);
     return decision;
@@ -2007,10 +2042,10 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
       if (!reasons.length) return { ok: true, url: v.url };
       const hard = reasons.some((r) => r.code === 'private_network');
       const decision = await ask({
-        kind: 'navigate', reasons: reasons.map((r) => r.text), destinationUrl: v.url, destinationOrigin: v.origin,
+        kind: 'navigate', reasons: reasons.map((r) => r.text), reasonCodes: reasons.map((r) => r.code), destinationUrl: v.url, destinationOrigin: v.origin,
         allowSite: !hard, siteDomain: v.registrable, siteLabel: v.registrable,
       });
-      if (decision === 'deny') return { ok: false, message: GUARD_DENIED_TEXT };
+      if (decision === 'deny') return { ok: false, message: deniedText };
       seenDomains.add(v.registrable);
       pageApprovedFor = v.registrable;
       return { ok: true, url: v.url };
@@ -2025,7 +2060,7 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
       if (!reasons.length) return true;
       const hard = reasons.some((r) => r.code === 'private_network');
       const decision = await ask({
-        kind: 'page', reasons: reasons.map((r) => r.text), pageUrl: v.url, destinationUrl: v.url, destinationOrigin: v.origin,
+        kind: 'page', reasons: reasons.map((r) => r.text), reasonCodes: reasons.map((r) => r.code), pageUrl: v.url, destinationUrl: v.url, destinationOrigin: v.origin,
         allowSite: !hard, siteDomain: v.registrable, siteLabel: v.registrable,
       });
       if (decision === 'deny') return false;
@@ -2058,12 +2093,12 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
       if (!unique.length) return true;
       const hard = unique.some((r) => ['private_network', 'form_submit', 'sensitive_label'].includes(r.code));
       const decision = await ask({
-        kind: 'click', reasons: unique.map((r) => r.text), pageUrl: page.ok ? page.url : String(pageUrl || ''),
+        kind: 'click', reasons: unique.map((r) => r.text), reasonCodes: unique.map((r) => r.code), pageUrl: page.ok ? page.url : String(pageUrl || ''),
         destinationUrl: dest ? dest.url : '', destinationOrigin: dest ? dest.origin : '',
         element: { tag: facts.tag, type: facts.type, text: facts.text, href: facts.href, formAction: facts.formAction },
         allowSite: !hard && !!pageDomain, siteDomain: pageDomain, siteLabel: pageDomain,
       });
-      if (decision === 'deny') return GUARD_DENIED_TEXT;
+      if (decision === 'deny') return deniedText;
       if (dest && decision) { seenDomains.add(dest.registrable); pageApprovedFor = dest.registrable; }
       return true;
     },
@@ -2085,7 +2120,7 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
       if (!reasons.length) return true;
       const shown = sensitiveField ? `${'•'.repeat(Math.min(text.length, 12))} (${text.length} characters, hidden)` : text;
       const decision = await ask({
-        kind: 'type', reasons: reasons.map((r) => r.text), pageUrl: page.ok ? page.url : String(pageUrl || ''),
+        kind: 'type', reasons: reasons.map((r) => r.text), reasonCodes: reasons.map((r) => r.code), pageUrl: page.ok ? page.url : String(pageUrl || ''),
         element: { tag: facts.tag, type: facts.type, text: '', field: [facts.labelText, facts.placeholder, facts.ariaLabel, facts.name, facts.id].filter(Boolean).join(' / '), formAction: facts.formAction },
         typed: shown,
         allowSite: !sensitiveField && !submits && !!pageDomain, siteDomain: pageDomain, siteLabel: pageDomain,
@@ -2093,7 +2128,7 @@ function createActionGuard({ taskId, sessionId, settings, signal, startUrls = []
       if (decision === 'deny') {
         return sensitiveField
           ? 'BLOCKED_SENSITIVE: typing into a password, card, one-time-code or other secret field was not approved by the user. Do not retry. Tell the user to enter it themselves.'
-          : GUARD_DENIED_TEXT;
+          : deniedText;
       }
       return true;
     },
@@ -2736,6 +2771,7 @@ const pendingAgentPermissions = new Map();
 
 function requestAgentPermission(taskId, sessionId, specs, settings, signal) {
   if (settings.agentConfirm === false) return Promise.resolve(true);
+  if (AS.normalizePermissionMode(settings.permissionMode) !== 'ask') return Promise.resolve(true); // "auto" / "none": nothing is asked
   if (taskAgentApprovals.has(taskId)) return Promise.resolve(true); // Autono security: user chose "Allow for this task only"
   const requestId = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve) => {
@@ -3478,6 +3514,9 @@ async function handleCoworkTask(taskId, sessionId, goalText, modelName, tabId, t
 
     // --- Autono security: task guard (approvals, origin containment) and incognito consent ---
     const guard = createActionGuard({ taskId, sessionId, settings, signal: abortController.signal, startUrls: [tabInfo?.url] });
+    if (tabInfo?.incognito && !incognitoApprovedTabs.has(tabId) && AS.normalizePermissionMode(settings.permissionMode) !== 'ask') {
+      incognitoApprovedTabs.add(tabId); // "auto" / "none": nothing is asked
+    }
     if (tabInfo?.incognito && !incognitoApprovedTabs.has(tabId)) {
       const incognitoAnswer = await requestActionApproval(taskId, sessionId, {
         kind: 'incognito',
@@ -4062,6 +4101,91 @@ ${summary ? `> ${summary}\n` : ''}
   }
 }
 
+// --- Visible mouse cursor: shows where the agent is about to click or type ---------------------------------------
+// autonoInstallCursor runs inside the page (isolated world) and keeps window.__autonoCursor; the click / type code
+// then awaits window.__autonoCursor.moveTo(x, y, true). It has to be self-contained because it is injected.
+function autonoInstallCursor(opts) {
+  let size = Math.max(12, Math.min(64, Math.round(Number(opts && opts.size)) || 22));
+  let enabled = !opts || opts.enabled !== false;
+  const sizePx = () => `${size}px`;
+  if (window.__autonoCursor) { window.__autonoCursor.configure(size, enabled); return true; }
+
+  const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const host = document.createElement('div');
+  host.setAttribute('data-autono-cursor', '');
+  host.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+  const root = host.attachShadow({ mode: 'closed' });
+  root.innerHTML = `<style>
+    .cur{position:fixed;left:0;top:0;opacity:0;pointer-events:none;will-change:transform;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));transition:transform 620ms cubic-bezier(.22,.8,.3,1),opacity 220ms ease}
+    .cur.show{opacity:1}
+    .cur svg{display:block;width:100%;height:100%;transform-origin:12% 8%;transition:transform 90ms ease}
+    .cur.press svg{transform:scale(.84)}
+    .ring{position:fixed;left:0;top:0;box-sizing:border-box;border:2px solid #38bdf8;border-radius:50%;opacity:0;pointer-events:none}
+    .ring.go{animation:autono-ring 460ms ease-out}
+    @keyframes autono-ring{from{opacity:.75;transform:var(--t) scale(.3)}to{opacity:0;transform:var(--t) scale(1.7)}}
+    @media (prefers-reduced-motion:reduce){.cur{transition:none}.ring.go{animation:none}}
+  </style>
+  <div class="cur"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 2v17l4.5-4.2 3.1 6.6 3-1.4-3.1-6.5H17z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg></div>
+  <div class="ring"></div>`;
+  const cur = root.querySelector('.cur');
+  const ring = root.querySelector('.ring');
+  let placed = false;
+  let hideTimer = null;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const apply = () => {
+    cur.style.width = sizePx(); cur.style.height = sizePx();
+    ring.style.width = `${Math.round(size * 1.3)}px`; ring.style.height = `${Math.round(size * 1.3)}px`;
+  };
+  // the arrow's tip (3,2 of 24) is the hot spot
+  const at = (x, y) => `translate(${Math.round(x - size * 0.125)}px, ${Math.round(y - size * 0.083)}px)`;
+  apply();
+
+  window.__autonoCursor = {
+    configure(newSize, newEnabled) {
+      size = newSize; enabled = newEnabled; apply();
+      if (!enabled) cur.classList.remove('show');
+    },
+    async moveTo(x, y, click) {
+      if (!enabled || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      clearTimeout(hideTimer);
+      if (!host.isConnected) (document.documentElement || document.body).appendChild(host);
+      if (!placed) {
+        // first appearance: start a little away from the target so it is seen travelling
+        cur.style.transition = 'none';
+        cur.style.transform = at(Math.max(8, x - 140), Math.min(window.innerHeight - 8, y + 90));
+        void cur.offsetWidth;
+        cur.style.transition = '';
+        placed = true;
+      }
+      cur.classList.add('show');
+      cur.style.transform = at(x, y);
+      await sleep(reduce ? 30 : 660);
+      if (click) {
+        cur.classList.add('press');
+        const d = Math.round(size * 1.3);
+        ring.style.setProperty('--t', `translate(${Math.round(x - d / 2)}px, ${Math.round(y - d / 2)}px)`);
+        ring.classList.remove('go'); void ring.offsetWidth; ring.classList.add('go');
+        await sleep(reduce ? 20 : 170);
+        cur.classList.remove('press');
+      }
+      hideTimer = setTimeout(() => cur.classList.remove('show'), 4000);
+    },
+  };
+  return true;
+}
+
+async function installAutonoCursor(tabId) {
+  try {
+    const s = await getSettings();
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: autonoInstallCursor,
+      args: [{ enabled: s.showCursor, size: s.cursorSize }],
+    });
+  } catch (_) { /* restricted page or the tab is gone: the action goes on without the cursor */ }
+}
+// --- end ---
+
 // Action execution helpers (SiteLegend + Browserius / Browser-use Multi-Strategy Engine)
 async function executeClickAction(tabId, target, guard = null, _probe = false) {
   try {
@@ -4079,9 +4203,10 @@ async function executeClickAction(tabId, target, guard = null, _probe = false) {
       expectFacts = probed;
     }
     // --- end ---
+    if (!_probe) await installAutonoCursor(tabId);
     const execResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (targetSelector, probeOnly, expect) => {
+      func: async (targetSelector, probeOnly, expect) => {
         function findInteractiveElement(target, isInputOnly = false) {
           if (!target && !isInputOnly) return null;
           const rawTarget = String(target || '').trim();
@@ -4272,6 +4397,8 @@ async function executeClickAction(tabId, target, guard = null, _probe = false) {
         const rect = el.getBoundingClientRect();
         const clientX = rect.left + rect.width / 2;
         const clientY = rect.top + rect.height / 2;
+        // visible mouse cursor travels to the element before the click happens
+        if (window.__autonoCursor) { try { await window.__autonoCursor.moveTo(clientX, clientY, true); } catch (e) {} }
         const eventInit = { bubbles: true, cancelable: true, view: window, clientX, clientY };
 
         el.dispatchEvent(new PointerEvent('pointerdown', eventInit));
@@ -4316,6 +4443,7 @@ async function executeTypeAction(tabId, target, value, guard = null, _probe = fa
       expectFacts = probed;
     }
     // --- end ---
+    if (!_probe) await installAutonoCursor(tabId);
     const execResults = await chrome.scripting.executeScript({
       target: { tabId },
       func: async (targetSelector, textToType, probeOnly, expect, abortSeq) => {
@@ -4465,6 +4593,15 @@ async function executeTypeAction(tabId, target, value, guard = null, _probe = fa
         el.focus();
         if (typeof el.select === 'function') {
           try { el.select(); } catch (e) {}
+        }
+
+        // visible mouse cursor travels to the field before typing starts
+        if (window.__autonoCursor) {
+          try {
+            const r0 = el.getBoundingClientRect();
+            await window.__autonoCursor.moveTo(r0.left + Math.min(r0.width / 2, 120), r0.top + r0.height / 2, true);
+          } catch (e) {}
+          if (cancelled()) return 'Typing cancelled by user';
         }
 
         // Brief natural hesitation upon focusing field
@@ -4759,6 +4896,8 @@ async function handleMcpAction(actionItem, bridgeUrl) {
     })();
     setMcpStatus({ lastAction: { action, summary, at: Date.now() } });
     broadcastMessage({ type: 'external_action', action, summary, host: mcpStatus.host }); // persistent in-panel indicator
+    // Not tied to the permission mode: these clicks and typing do not go through the action guard, so the card is
+    // their only gate (secret fields, local addresses). Only the explicit "auto-allow external actions" switch skips it.
     if (MCP_APPROVAL_ACTIONS.has(action) && !settingsExt.autoAllowExternalActions) {
       const allowed = await requestExternalActionApproval(actionItem, summary);
       if (!allowed) throw new Error('The user did not allow this external action');

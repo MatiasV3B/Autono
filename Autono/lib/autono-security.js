@@ -264,6 +264,36 @@
     return Math.min(100, Math.max(1, n));
   }
 
+  // --- Permission mode ----------------------------------------------------------------------------
+  // ask  (default): Autono asks as the "Supervision Level" says.
+  // auto: nothing is asked. Still refused: typing into a secret field, opening a local or internal address.
+  // none: nothing is asked. Still refused: typing into a secret field.
+  // The Bridge adds limits that no mode lifts (CLI sandbox, no shutdown or hibernate, code execution off).
+  const PERMISSION_MODES = ['ask', 'auto', 'none'];
+  function normalizePermissionMode(value) {
+    const v = String(value === undefined || value === null ? '' : value).trim().toLowerCase();
+    return PERMISSION_MODES.includes(v) ? v : 'ask';
+  }
+  /**
+   * What to do with a request that carries these reason codes ('private_network', 'sensitive_field', ...):
+   * 'ask' = show the approval card, 'allow' = approve without asking, 'deny' = refuse, no card.
+   */
+  function permissionDecision(mode, reasonCodes) {
+    const m = normalizePermissionMode(mode);
+    if (m === 'ask') return 'ask';
+    const codes = Array.isArray(reasonCodes) ? reasonCodes : [];
+    if (codes.includes('sensitive_field')) return 'deny';
+    if (m === 'auto' && codes.includes('private_network')) return 'deny';
+    return 'allow';
+  }
+  /** Size of the visible mouse cursor in px (12..64). */
+  function clampCursorSize(value, fallback) {
+    const def = fallback === undefined ? 22 : fallback;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return def;
+    return Math.min(64, Math.max(12, n));
+  }
+
   /** Normalise the context blocks the panel sends next to the user's typed goal. */
   const CONTEXT_KINDS = ['search_results', 'attachment', 'tab', 'fragment', 'selection', 'session_file'];
   function normalizeContextBlocks(raw) {
@@ -305,6 +335,10 @@
     isLoopbackHost,
     parseBridgeUrl,
     clampMaxSteps,
+    PERMISSION_MODES,
+    normalizePermissionMode,
+    permissionDecision,
+    clampCursorSize,
     normalizeContextBlocks,
   };
 
