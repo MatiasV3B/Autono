@@ -393,9 +393,12 @@ autono/
 │   ├── background.js           # Service worker: sesiones, streaming y enrutamiento
 │   ├── manifest.json           # Manifiesto de la extensión
 │   └── package.json            # Metadatos y dependencias de desarrollo
-├── dist/                       # Compilación empaquetada (generada)
-├── .github/                    # Plantillas de issues y pull requests
-├── CODE_OF_CONDUCT.md · CONTRIBUTING.md · SECURITY.md · LICENSE
+├── docs/
+│   └── security/               # Auditoría de seguridad, lista de pruebas y contrato de seguridad del Bridge
+├── tests/                      # Pruebas de seguridad y de compuertas (`npm run test:unit` dentro de Autono/)
+├── dist/                       # Compilación empaquetada (generada, no va en git)
+├── .github/                    # CI, Dependabot, plantillas de issues y pull requests
+├── CODE_OF_CONDUCT.md · CONTRIBUTING.md · SECURITY.md · PRIVACY.md · LICENSE
 ├── README.md                   # Versión en inglés
 └── README.es.md                # Este archivo (español)
 ```
