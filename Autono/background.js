@@ -802,19 +802,31 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // ─── Context Menu (Right-Click: Ask Autono Anywhere) ────────────────────────
+// onInstalled and onStartup can both fire for the same worker start. Two overlapping removeAll -> create runs made
+// the second create fail with "duplicate id", so the setup runs one at a time and reads chrome.runtime.lastError.
+let contextMenuSetup = null;
 function setupContextMenus() {
-  try {
-    if (!chrome.contextMenus) return;
-    chrome.contextMenus.removeAll(() => {
-      chrome.contextMenus.create({
-        id: 'antigravity_ask_page',
-        title: 'Ask Autono',
-        contexts: ['page', 'frame', 'link', 'image', 'selection']
+  if (contextMenuSetup) return contextMenuSetup;
+  contextMenuSetup = new Promise((resolve) => {
+    try {
+      if (!chrome.contextMenus) return resolve();
+      chrome.contextMenus.removeAll(() => {
+        void chrome.runtime.lastError;
+        chrome.contextMenus.create({
+          id: 'antigravity_ask_page',
+          title: 'Ask Autono',
+          contexts: ['page', 'frame', 'link', 'image', 'selection']
+        }, () => {
+          void chrome.runtime.lastError; // already there: nothing to do
+          resolve();
+        });
       });
-    });
-  } catch (err) {
-    console.warn('Context menu setup error:', err);
-  }
+    } catch (err) {
+      console.warn('Context menu setup error:', err);
+      resolve();
+    }
+  }).finally(() => { contextMenuSetup = null; });
+  return contextMenuSetup;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
