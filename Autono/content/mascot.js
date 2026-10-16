@@ -16,7 +16,6 @@
     bubble: { w: 480, h: 480, box: [90, 54, 476, 417], scale: 0.357 },
     coding: { w: 498, h: 498, box: [25, 98, 474, 401], scale: 0.278 },
     dancing: { w: 480, h: 480, box: [78, 113, 402, 390], scale: 0.312 },
-    fire: { w: 498, h: 336, box: [133, 55, 450, 336], scale: 0.417 },
     soccer: { w: 498, h: 498, box: [26, 98, 473, 400], scale: 0.278 },
     thinking: { w: 480, h: 480, box: [79, 45, 383, 428], scale: 0.286 },
     waiting: { w: 480, h: 480, box: [40, 146, 445, 380], scale: 0.238 },
@@ -36,10 +35,14 @@
     // cut from the nap video (same 6 px art pixel): asleep, and waking up with a wave
     sleeping: { w: 76, h: 73, box: [0, 0, 76, 73], scale: 1.25 },
     wave: { w: 76, h: 67, box: [0, 0, 76, 67], scale: 1.25 },
+    // the crying sequence (already at the right size): it got stuck
+    cry: { w: 84, h: 74, box: [0, 0, 84, 74], scale: 1 },
+    // asleep with floating Zs (already at the right size): what it does after a while with nothing to do
+    sleep: { w: 84, h: 96, box: [0, 0, 84, 96], scale: 1 },
   };
 
   // How long one loop of each animation lasts (ms); used to take turns between animations
-  const DUR = { bubble: 2300, coding: 3650, dancing: 1700, fire: 4410, soccer: 4510, thinking: 2500, waiting: 700, working: 1500, lightbulb: 1100, look: 3150, jump: 1860, reading_in: 3070, reading: 990, debugging_in: 2730, debugging: 1320, coffee: 3000, sleeping: 1600, wave: 2050 };
+  const DUR = { bubble: 2300, coding: 3650, dancing: 1700, cry: 2340, sleep: 2450, soccer: 4510, thinking: 2500, waiting: 700, working: 1500, lightbulb: 1100, look: 3150, jump: 1860, reading_in: 3070, reading: 990, debugging_in: 2730, debugging: 1320, coffee: 3000, sleeping: 1600, wave: 2050 };
 
   // state -> animation(s) + short text (red tone for errors). seq = [animation, loops] pairs that take
   // turns; loops 0 means "stay on this one and keep looping it".
@@ -57,8 +60,9 @@
     waiting: { seq: [['waiting', 0]], en: 'Needs your OK', es: 'Necesito tu permiso', sticky: true }, // the clock
     waiting_long: { seq: [['coffee', 2], ['sleeping', 0]], en: 'Still waiting for you', es: 'Sigo esperándote', sticky: true },
     done: { seq: [['jump', 0]], en: 'Finished! Click for a /btw', es: '¡Terminé! Clic para un /btw', sticky: true }, // jumping, on repeat
-    error: { seq: [['fire', 0]], en: 'It got stuck', es: 'Se trabó', sticky: true, tone: 'error' }, // the lit fuse
-    idle: { seq: [['wave', 2], ['dancing', 2], ['soccer', 1], ['bubble', 1], ['coffee', 1]], en: 'Hi! Ask me a /btw', es: '¡Hola! Pregúntame un /btw' },
+    error: { seq: [['cry', 0]], en: 'It got stuck', es: 'Se trabó', sticky: true, tone: 'error' }, // crying
+    // it plays for about 17 seconds and then falls asleep until something happens
+    idle: { seq: [['wave', 2], ['dancing', 2], ['soccer', 1], ['bubble', 1], ['coffee', 1], ['sleep', 0]], en: 'Hi! Ask me a /btw', es: '¡Hola! Pregúntame un /btw' },
   };
 
   const T = {
