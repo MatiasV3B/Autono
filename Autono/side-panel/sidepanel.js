@@ -9269,14 +9269,18 @@ You are a world-class principal software engineer.
   // Sends the mode to the Bridge so its Antigravity CLI follows it. Only an extension page can do it.
   async function syncPermissionModeToBridge(mode, bridgeUrl) {
     updatePermissionBridgeBlock();
-    if (!usesLocalBridge()) return;
-    const status = settingEl('permBridgeStatus');
+    const used = usesLocalBridge();
+    // Going back to "ask" is always sent, so a Bridge left in "auto" never stays looser than the extension. Looser modes
+    // only go to a Bridge that is actually in use.
+    if (!used && mode !== 'ask') return;
+    const status = used ? settingEl('permBridgeStatus') : null;
     try {
       const res = await fetch(`${bridgeUrl}/api/permissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode }),
       });
+      if (!used) return; // nothing to show: the person is not using the Bridge
       if (res.status === 404) {
         if (status) status.textContent = 'This Bridge is older than Autono expects and does not know permission modes yet. Update it so the mode also applies to its Antigravity CLI.';
         return;
