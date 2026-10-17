@@ -9249,15 +9249,38 @@ You are a world-class principal software engineer.
     if (svg) { svg.setAttribute('width', String(n)); svg.setAttribute('height', String(n)); }
   }
 
+  // The permission mode belongs to the extension and works with any provider. The Bridge only hears about it when
+  // something runs through it (a provider set to the local terminal), so people on their own API keys never touch it.
+  function usesLocalBridge() {
+    const modes = [
+      settingAntigravityMode?.value || currentAntigravityMode,
+      settingClaudeMode?.value || currentClaudeMode,
+      settingOpenaiMode?.value || currentOpenaiMode,
+    ];
+    if (modes.some((m) => m && m !== 'api')) return true;
+    try { return currentEngineIsLocal(); } catch (_) { return false; } // may run before the model list is ready
+  }
+
+  function updatePermissionBridgeBlock() {
+    const block = settingEl('permBridgeBlock');
+    if (block) block.classList.toggle('hidden', !usesLocalBridge());
+  }
+
   // Sends the mode to the Bridge so its Antigravity CLI follows it. Only an extension page can do it.
   async function syncPermissionModeToBridge(mode, bridgeUrl) {
-    const status = settingEl('permBridgeStatus');
+    updatePermissionBridgeBlock();
+    const used = usesLocalBridge();
+    // Going back to "ask" is always sent, so a Bridge left in "auto" never stays looser than the extension. Looser modes
+    // only go to a Bridge that is actually in use.
+    if (!used && mode !== 'ask') return;
+    const status = used ? settingEl('permBridgeStatus') : null;
     try {
       const res = await fetch(`${bridgeUrl}/api/permissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode }),
       });
+      if (!used) return; // nothing to show: the person is not using the Bridge
       if (res.status === 404) {
         if (status) status.textContent = 'This Bridge is older than Autono expects and does not know permission modes yet. Update it so the mode also applies to its Antigravity CLI.';
         return;
@@ -9280,8 +9303,10 @@ You are a world-class principal software engineer.
   }
 
   async function refreshBridgePermissionStatus() {
+    updatePermissionBridgeBlock();
     const status = settingEl('permBridgeStatus');
     if (!status) return;
+    if (!usesLocalBridge()) { status.textContent = ''; return; }
     const bridgeUrl = (settingBridgeUrl?.value?.trim() || 'http://127.0.0.1:8765').replace(/\/+$/, '');
     try {
       const res = await fetch(`${bridgeUrl}/api/permissions`);
@@ -9308,6 +9333,11 @@ You are a world-class principal software engineer.
     if (slider) slider.addEventListener('input', syncCursorSizeUi);
     const show = settingEl('settingShowCursor');
     if (show && slider) show.addEventListener('change', () => { slider.disabled = !show.checked; });
+    // the Bridge part of the card follows the provider choice
+    [settingAntigravityMode, settingClaudeMode, settingOpenaiMode].forEach((sel) => {
+      if (sel) sel.addEventListener('change', refreshBridgePermissionStatus);
+    });
+    updatePermissionBridgeBlock();
   }
   wirePermissionsUi();
   // --- end ---

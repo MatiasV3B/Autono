@@ -741,7 +741,7 @@
                     <span class="perm-radio" aria-hidden="true"></span>
                     <span class="perm-text">
                       <span class="perm-name">Ask manually <span class="perm-badge">Default</span></span>
-                      <span class="perm-desc">Autono asks before it acts, and the Bridge refuses tools that need permission, such as opening links or deleting files. Safe actions inside the sandbox (like writing a temporary file) still run without asking. How often Autono asks depends on the Supervision Level below.</span>
+                      <span class="perm-desc">Autono asks before it acts. How often depends on the Supervision Level below.</span>
                     </span>
                   </button>
                   <button type="button" class="perm-option" role="radio" aria-checked="false" data-mode="auto">
@@ -769,12 +769,19 @@
                   <ul>
                     <li>Never types into password, card or one-time-code fields.</li>
                     <li>Actions requested by another program through remote control still ask, unless you allowed them in Tools &amp; MCP.</li>
+                  </ul>
+                </div>
+
+                <div class="perm-limits hidden" id="permBridgeBlock">
+                  <span class="perm-limits-title">If you use the Local Bridge</span>
+                  <p class="field-hint">These permissions are set here, in the extension, and sent to the Bridge. In Ask manually the Bridge refuses tools that need permission, such as opening links or deleting files; safe actions inside its sandbox (like writing a temporary file) still run without asking. If you use your own API keys instead, none of this applies.</p>
+                  <ul>
                     <li>The Bridge runs the Antigravity CLI inside its sandbox. That is the limit; Ask manually does not mean the model can do nothing.</li>
                     <li>The Bridge never shuts down or hibernates the computer.</li>
                     <li>The Bridge does not run code unless you turn that on in its config file.</li>
                   </ul>
+                  <span class="field-hint" id="permBridgeStatus"></span>
                 </div>
-                <span class="field-hint" id="permBridgeStatus"></span>
               </div>
             </div>
 
