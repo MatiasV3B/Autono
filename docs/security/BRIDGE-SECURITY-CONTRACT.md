@@ -73,7 +73,7 @@ All credentialed requests use `redirect: 'error'` (the Bridge must not redirect 
 
 ## 3. Extension-side behaviours the Bridge can rely on
 
-- URLs: `bridgeUrl`, `localMcpUrl` and provider `baseUrl` must be `http://` on `127.0.0.1`/`[::1]`/
+- URLs: `bridgeUrl`, `localMcpUrl` and provider `baseUrl` must be `http://` on `127.0.0.1`/
   `localhost`, or `https://` elsewhere (with a warning); credentials in the URL are rejected.
 - The remote-control poller only runs against loopback hosts (a non-loopback host needs an explicit
   per-host confirmation), requires the pairing token, stops after 10 consecutive failures, and starts only

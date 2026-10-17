@@ -6182,7 +6182,7 @@ marked.use({
       // Autono security (A20): https (or loopback http), no embedded credentials
       const provUrlCheck = AS.parseBridgeUrl(baseUrl);
       if (!provUrlCheck.ok) {
-        showToast(provUrlCheck.error === 'insecure_http' ? 'Base URL must use https (http is only allowed for localhost).' : 'Base URL is not valid (no credentials, http/https only).');
+        showToast(provUrlCheck.error === 'insecure_http' ? 'Base URL must use https (http is only allowed for localhost).' : provUrlCheck.error === 'ipv6_loopback' ? 'Chrome blocks [::1] for extensions. Use 127.0.0.1 or localhost.' : 'Base URL is not valid (no credentials, http/https only).');
         return;
       }
       baseUrl = provUrlCheck.url;
@@ -6938,7 +6938,9 @@ marked.use({
     if (!bridgeUrlCheck.ok) {
       showToast(bridgeUrlCheck.error === 'insecure_http'
         ? 'Bridge URL rejected: http is only allowed for 127.0.0.1 / localhost. Use https for a remote Bridge.'
-        : 'Bridge URL rejected: it must be a plain http(s) address without credentials.');
+        : bridgeUrlCheck.error === 'ipv6_loopback'
+          ? 'Bridge URL rejected: Chrome blocks [::1] for extensions. Use http://127.0.0.1:8765 or http://localhost:8765.'
+          : 'Bridge URL rejected: it must be a plain http(s) address without credentials.');
       return;
     }
     if (bridgeUrlCheck.warning) {
