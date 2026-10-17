@@ -113,8 +113,15 @@ test('formatButtons serialises [index] label (no [object Object])', () => {
 });
 
 // ---- parseBridgeUrl ----
+test('parseBridgeUrl: IPv6 loopback is rejected (the CSP cannot allow it)', () => {
+  for (const u of ['http://[::1]:8765', '[::1]:8765', 'http://[::1]/', 'https://[::1]:8765']) {
+    const r = S.parseBridgeUrl(u);
+    assert.strictEqual(r.ok, false, u);
+    assert.strictEqual(r.error, 'ipv6_loopback', u);
+  }
+});
 test('parseBridgeUrl: loopback http ok', () => {
-  for (const u of ['http://127.0.0.1:8765', 'http://localhost:8765/', 'http://[::1]:8765', '127.0.0.1:8765', 'localhost:9000/mcp/sse']) {
+  for (const u of ['http://127.0.0.1:8765', 'http://localhost:8765/', '127.0.0.1:8765', 'localhost:9000/mcp/sse']) {
     const r = S.parseBridgeUrl(u);
     assert.ok(r.ok, u + ' ' + JSON.stringify(r));
     assert.strictEqual(r.loopback, true);

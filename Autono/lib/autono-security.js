@@ -219,7 +219,8 @@
 
   /**
    * Validate and normalise a Bridge / MCP / provider base URL.
-   *  - http: only for loopback (127.0.0.1, [::1], localhost)
+   *  - http: only for loopback (127.0.0.1, localhost). [::1] is rejected ('ipv6_loopback'): the extension CSP cannot
+   *    allow an IPv6 literal in connect-src, so Chrome would block every request to it.
    *  - https: anything else, reported with warning 'non_loopback'
    *  - credentials, other schemes, empty hosts and absurd lengths are rejected
    * Returns { ok, url, origin, host, loopback, warning?, error? }.
@@ -240,6 +241,7 @@
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'bad_scheme' };
     if (u.username || u.password) return { ok: false, error: 'credentials' };
     if (!u.hostname) return { ok: false, error: 'invalid' };
+    if (u.hostname === '[::1]' || u.hostname === '::1') return { ok: false, error: 'ipv6_loopback', host: u.host };
     const loopback = isLoopbackHost(u.hostname);
     if (u.protocol === 'http:' && !loopback) return { ok: false, error: 'insecure_http', host: u.host };
     if (o.loopbackOnly && !loopback) return { ok: false, error: 'non_loopback', host: u.host };
